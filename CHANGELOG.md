@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.9.0] — 2026-11-04
+
+### Added
+
+- `setup` stores the Gemini API key in the private config file (0600):
+  prompts once with hidden input, or accepts `--api-key`. Re-running setup
+  without a key keeps the stored one.
+- `run`/`ask`/`continue` resolve the key in order: `GEMINI_API_KEY`
+  environment, then the stored config. A new user needs **no** `.env` and no
+  shell exports.
+
+### Changed
+
+- README rewritten for the zero-friction first run: setup asks for the key,
+  the model switching section explains how to alternate between
+  `gemini-4-argon` and `gemini-3.8-flash`, and a new run-vs-ask table
+  explains which mode fits which task.
+
 ## [0.8.0] — 2026-11-04
 
 ### Added

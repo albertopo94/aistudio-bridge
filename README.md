@@ -48,13 +48,20 @@ Or run it from the checkout without installing:
 
 ## First run
 
+Three commands, no `.env`, no shell exports:
+
 ```bash
-export GEMINI_API_KEY="..."          # never committed, never logged
-remote-worker setup --model gemini-3.8-flash --budget 250000
+python3 -m pip install -e .
+remote-worker setup                    # asks for your Gemini API key once (hidden input)
 remote-worker run "Add a function divide(a, b) to main.py that raises
 ValueError on zero, with two tests. Run the test suite." \
   --repo https://github.com/albertopo94/worker-poc-toy
 ```
+
+`setup` stores the key, the default model and the budget in a private file
+(`~/.remote-worker/config.json`, 0600). Re-running `setup` without a key
+keeps the stored one. The environment variable `GEMINI_API_KEY` still wins
+if you prefer it, but nothing requires it.
 
 Output:
 
@@ -97,6 +104,35 @@ git diff main
 Only `gemini-4-argon` and `gemini-3.8-flash` are accepted. A lower model is
 rejected as a usage error instead of being silently downgraded: cost and
 quality are your decision.
+
+Switching between them:
+
+```bash
+# change the default for all future tasks
+remote-worker setup --model gemini-4-argon --budget 250000
+remote-worker setup --model gemini-3.8-flash --budget 150000
+
+# or override for a single task, leaving the default untouched
+remote-worker ask "quick summary" --model gemini-3.8-flash
+remote-worker run "..." --repo <url> --model gemini-4-argon
+```
+
+`gemini-3.8-flash` is the agent's native model and uses fewer tokens per
+task; `gemini-4-argon` reasons deeper and spends more. Both run on the free
+tier.
+
+## run vs ask
+
+| | `run` | `ask` |
+|---|---|---|
+| Task kind | code that edits a repository | everything else (research, analysis, generation) |
+| Requires | `--repo <url>` | nothing |
+| Returns | a diff on a local branch + test result | the worker's text |
+| Sandbox files | downloaded and reviewed | not downloaded |
+| Use when | the result must be reviewable and merged | you only need the answer |
+
+Rule of thumb from the skill: if the worker must **edit code in a repo**, use
+`run`; if it only needs to **answer**, use `ask`.
 
 ## Limits worth knowing
 
