@@ -88,10 +88,14 @@ def run_tests(workdir: str, command: list[str],
     Returns ``(returncode, combined_output)``. A non-zero status is a result,
     not an exception: the caller reports it.
     """
+    env = dict(os.environ)
+    # The user reviews the clone's git diff after the tests run, so the test
+    # run must not add build artifacts that would appear as untracked changes.
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         proc = subprocess.run(
             command, cwd=workdir, capture_output=True, text=True,
-            timeout=timeout,
+            timeout=timeout, env=env,
         )
     except subprocess.TimeoutExpired:
         return 124, f"test command timed out after {timeout}s"

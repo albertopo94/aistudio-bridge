@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import time
 from urllib.parse import urlsplit
 
@@ -136,9 +137,12 @@ class TaskRunner:
             workdir=os.path.join(self.workdir, "clone"),
             repo_dir=repo_name,
         )
-        tests_rc, tests_output = run_tests(
-            applied["clone_dir"], DEFAULT_TEST_COMMAND
-        )
+        # The diff the user reviews must not contain artifacts that the test
+        # run will add, so the tests run against a throwaway copy.
+        tests_clone = applied["clone_dir"] + ".tests"
+        shutil.copytree(applied["clone_dir"], tests_clone,
+                        ignore=shutil.ignore_patterns(".git"))
+        tests_rc, tests_output = run_tests(tests_clone, DEFAULT_TEST_COMMAND)
         result.update({
             "clone_dir": applied["clone_dir"],
             "changed": applied["changed"],

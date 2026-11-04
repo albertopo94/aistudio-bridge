@@ -161,3 +161,49 @@ class TestRunTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestApplyPurgesRootPycache(unittest.TestCase):
+    """A __pycache__ at the repo root must not reach the branch diff."""
+
+    def setUp(self):
+        if apply_to_branch is None:
+            self.fail("RED: remote_worker.sync not implemented yet")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = self._tmp.name
+        self.origin = make_origin(self.tmp)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_root_pycache_is_purged_before_overlay(self):
+        tar = make_worker_tar(self.tmp)  # includes __pycache__/stale.cpython-312.pyc
+        result = apply_to_branch(
+            tar_path=tar, repo_url=self.origin,
+            branch="worker/purge", workdir=os.path.join(self.tmp, "clone"),
+        )
+        clone = result["clone_dir"]
+        self.assertNotIn("__pycache__", result["diff"])
+        self.assertFalse(os.path.exists(os.path.join(clone, "__pycache__")))
+
+
+class TestRunTestsDoesNotPolluteDiff(unittest.TestCase):
+    """The project's own tests must not add build artifacts to the clone,
+    because the user reviews the diff after the tests run."""
+
+    def setUp(self):
+        if apply_to_branch is None:
+            self.fail("RED: remote_worker.sync not implemented yet")
+
+    def test_run_tests_with_nobytes_adds_no_pycache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _ = run_tests(
+                tmp,
+                ["python3", "-c",
+                 "import sys, os; sys.path.insert(0, os.getcwd()); "
+                 "open('m.py','w').write('x=1'); import m; print('ok')"],
+            )
+            self.assertEqual(rc, 0)
+            self.assertFalse(
+                os.path.exists(os.path.join(tmp, "__pycache__")),
+                "run_tests created a __pycache__ in the clone",
+            )
