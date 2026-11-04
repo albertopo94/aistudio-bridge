@@ -1,0 +1,171 @@
+"""Round trip between the local repository and the remote sandbox.
+
+Two directions, one rule each:
+
+* **In:** the sandbox clones the repository itself from a ``repository``
+  source. The URL and the size limit are all this side needs.
+* **Out:** the workspace is downloaded as a tar and applied to a *fresh
+  local clone on a new branch*. The sandbox's own ``.git`` and build
+  artifacts never travel: overlaying them would clobber the clone's history
+  and, in the PoC, a root-owned ``__pycache__`` entry aborted ``git add``.
+
+Nothing here pushes. Git truth stays on the user's machine; merging the
+branch is the user's decision.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import tarfile
+import tempfile
+
+#: Documented cap for a ``repository`` source (docs/agent-environment).
+REPOSITORY_SOURCE_LIMIT_BYTES = 500 * 1024 * 1024
+
+#: Entries inside a downloaded workspace that must never be overlaid.
+EXCLUDED_DIRS = frozenset({".git", "__pycache__", ".pytest_cache", "node_modules"})
+
+
+class GitError(RuntimeError):
+    """A git command failed; the message carries its stderr."""
+
+
+def mount_repo(source_url: str, target: str,
+               size_bytes: int | None = None) -> dict:
+    """Build the ``repository`` source entry for an environment.
+
+    ``size_bytes`` is optional: when the caller already knows the repository
+    size, an oversized one is rejected here instead of failing inside the
+    sandbox.
+    """
+    if not source_url:
+        raise ValueError("source_url is required")
+    if not target or not target.startswith("/"):
+        raise ValueError("target must be an absolute path inside the sandbox")
+    if size_bytes is not None and size_bytes > REPOSITORY_SOURCE_LIMIT_BYTES:
+        raise ValueError(
+            f"repository source is capped at "
+            f"{REPOSITORY_SOURCE_LIMIT_BYTES // (1024 * 1024)} MB; "
+            f"got {size_bytes} bytes"
+        )
+    return {"type": "repository", "source": source_url, "target": target}
+
+
+def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
+                    workdir: str, repo_dir: str | None = None) -> dict:
+    """Apply a downloaded workspace tar onto a fresh clone, on a new branch.
+
+    Returns ``{"clone_dir", "diff", "changed"}``. ``changed`` lists the
+    ``git status --short`` lines so the caller can report what moved without
+    re-running git.
+    """
+    clone = os.path.abspath(workdir)
+    if not os.path.isdir(os.path.join(clone, ".git")):
+        _git(None, "clone", "-q", repo_url, clone)
+    _git(clone, "checkout", "-q", "-B", branch)
+
+    with tempfile.TemporaryDirectory(prefix="worker-tar-") as scratch:
+        _extract(tar_path, scratch)
+        source_root = _repo_root(scratch, repo_dir)
+        _purge_artifacts(source_root)
+        _overlay(source_root, clone)
+
+    _git(clone, "add", "-A")
+    diff = _git(clone, "diff", "--cached").stdout
+    changed = [
+        line for line in _git(clone, "status", "--short").stdout.splitlines()
+        if line.strip()
+    ]
+    return {"clone_dir": clone, "diff": diff, "changed": changed}
+
+
+def run_tests(workdir: str, command: list[str],
+              timeout: float = 1800.0) -> tuple[int, str]:
+    """Run the project's own test command inside the clone.
+
+    Returns ``(returncode, combined_output)``. A non-zero status is a result,
+    not an exception: the caller reports it.
+    """
+    try:
+        proc = subprocess.run(
+            command, cwd=workdir, capture_output=True, text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, f"test command timed out after {timeout}s"
+    except FileNotFoundError as exc:
+        return 127, str(exc)
+    output = (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode, output.strip()
+
+
+# --- internals ----------------------------------------------------------
+
+def _git(cwd: str | None, *args: str) -> subprocess.CompletedProcess:
+    argv = ["git", *args]
+    if cwd is not None:
+        argv = ["git", "-C", cwd, *args]
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise GitError(
+            f"git {' '.join(args)} failed: "
+            f"{(proc.stderr or proc.stdout).strip()}"
+        )
+    return proc
+
+
+def _extract(tar_path: str, dest: str) -> None:
+    with tarfile.open(tar_path) as tar:
+        try:
+            tar.extractall(dest, filter="data")
+        except TypeError:  # Python < 3.12 has no filter argument
+            tar.extractall(dest)
+
+
+def _repo_root(scratch: str, repo_dir: str | None) -> str:
+    if repo_dir:
+        root = os.path.join(scratch, repo_dir)
+        if not os.path.isdir(root):
+            raise ValueError(f"repo_dir {repo_dir!r} not found in the archive")
+        return root
+    entries = [
+        name for name in os.listdir(scratch)
+        if os.path.isdir(os.path.join(scratch, name))
+    ]
+    if len(entries) != 1:
+        raise ValueError(
+            "cannot infer the repository directory inside the archive "
+            f"(found {sorted(entries)}); pass repo_dir explicitly"
+        )
+    return os.path.join(scratch, entries[0])
+
+
+def _purge_artifacts(root: str) -> None:
+    """Remove the sandbox's git metadata and build artifacts, then make the
+    tree readable/writable so the overlay cannot fail on sandbox modes."""
+    for dirpath, dirnames, _ in os.walk(root, topdown=True):
+        for name in list(dirnames):
+            if name in EXCLUDED_DIRS:
+                shutil.rmtree(os.path.join(dirpath, name), ignore_errors=True)
+                dirnames.remove(name)
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in [*dirnames, *filenames]:
+            path = os.path.join(dirpath, name)
+            try:
+                os.chmod(path, os.stat(path).st_mode | 0o600)
+            except OSError:
+                pass
+
+
+def _overlay(source_root: str, clone: str) -> None:
+    for name in os.listdir(source_root):
+        if name in EXCLUDED_DIRS:
+            continue
+        src = os.path.join(source_root, name)
+        dst = os.path.join(clone, name)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
