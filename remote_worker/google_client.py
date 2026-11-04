@@ -1,10 +1,18 @@
-"""HTTP client for the Gemini Interactions API (stdlib only).
+"""HTTP clients for the Gemini API (stdlib only).
 
-Design notes (from plan-remote-worker/02, validated by the PoC):
-- The API key travels ONLY in the ``x-goog-api-key`` header, never in the
-  body and never in any error message.
+Two small clients share one request path:
+
+* :class:`InteractionsClient` — ``POST /v1beta/interactions``, the agent
+  turns.
+* :class:`FilesClient` — the Environments files endpoints, used to retrieve
+  what the sandbox produced.
+
+Behaviour the PoC proved is required, pinned here for both clients:
+
+- The API key travels ONLY in the ``x-goog-api-key`` header: never in the
+  body, never in a URL, never in an error message.
 - The agent's answer text lives in the last ``model_output`` step, not in
-  a top-level ``output_text`` field (PoC finding).
+  a top-level ``output_text`` field.
 - Rate limits (429) and API errors (4xx) are reported to the caller with
   the exact response body; there is no automatic retry.
 - Timeouts surface as a clear error, never a hang.
@@ -13,7 +21,9 @@ Design notes (from plan-remote-worker/02, validated by the PoC):
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
@@ -34,6 +44,38 @@ class InteractionsError(RuntimeError):
 
 class InteractionsTimeoutError(TimeoutError):
     """The request exceeded the client's timeout."""
+
+
+def _send(method: str, url: str, api_key: str, timeout: float,
+          data: bytes | None = None) -> bytes:
+    """Perform one request and return the raw response body."""
+    headers = {"x-goog-api-key": api_key}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        url, data=data, method=method, headers=headers
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            return resp.read()
+    except TimeoutError as exc:
+        raise InteractionsTimeoutError(
+            f"timeout: no response after {timeout}s calling {url}"
+        ) from exc
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise InteractionsError(exc.code, raw) from exc
+    except urllib.error.URLError as exc:
+        cause = str(exc.reason)
+        if "timeout" in cause.lower():
+            raise InteractionsTimeoutError(
+                f"timeout: no response after {timeout}s calling {url}"
+            ) from exc
+        raise InteractionsError(0, f"network error: {cause}") from exc
+
+
+def _quote_path(path: str) -> str:
+    return urllib.parse.quote(path.strip("/"), safe="/")
 
 
 class InteractionsClient:
@@ -70,7 +112,11 @@ class InteractionsClient:
         if previous_interaction_id is not None:
             body["previous_interaction_id"] = previous_interaction_id
 
-        return self._post("/v1beta/interactions", body)
+        raw = _send(
+            "POST", self._base_url + "/v1beta/interactions",
+            self._api_key, self._timeout, json.dumps(body).encode("utf-8"),
+        )
+        return json.loads(raw.decode("utf-8"))
 
     def last_model_output(self, interaction: dict) -> str:
         """Return the text of the LAST ``model_output`` step.
@@ -92,35 +138,55 @@ class InteractionsClient:
         """Token counts for the interaction ({} when absent)."""
         return dict(interaction.get("usage", {}))
 
-    # --- internals -------------------------------------------------------
 
-    def _post(self, path: str, body: dict) -> dict:
-        data = json.dumps(body).encode("utf-8")
-        request = urllib.request.Request(
-            self._base_url + path,
-            data=data,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "x-goog-api-key": self._api_key,
-            },
+class FilesClient:
+    """Read-side client for the Environments files endpoints."""
+
+    def __init__(self, api_key: str, base_url: str = DEFAULT_BASE_URL,
+                 timeout: float = 300.0):
+        if not api_key:
+            raise ValueError("api_key is required")
+        self._api_key = api_key
+        self._base_url = base_url.rstrip("/")
+        self._timeout = timeout
+
+    def _files_url(self, environment_id: str, path: str = "",
+                   *, media: bool = False, recursive: bool = True) -> str:
+        url = (
+            f"{self._base_url}/v1beta/environments/"
+            f"{urllib.parse.quote(environment_id, safe='')}/files"
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except TimeoutError as exc:
-            raise InteractionsTimeoutError(
-                f"timeout: no response after {self._timeout}s calling {path}"
-            ) from exc
-        except urllib.error.HTTPError as exc:
-            raw = exc.read().decode("utf-8", errors="replace")
-            raise InteractionsError(exc.code, raw) from exc
-        except urllib.error.URLError as exc:
-            # A URLError with a timeout cause (no exception object) vs.
-            # a plain network error: both are reported with the cause.
-            cause = str(exc.reason)
-            if "timeout" in cause.lower():
-                raise InteractionsTimeoutError(
-                    f"timeout: no response after {self._timeout}s calling {path}"
-                ) from exc
-            raise InteractionsError(0, f"network error: {cause}") from exc
+        if path.strip("/"):
+            url += "/" + _quote_path(path)
+        params = []
+        if media:
+            params.append("alt=media")
+        if recursive:
+            params.append("recursive=true")
+        if params:
+            url += "?" + "&".join(params)
+        return url
+
+    def list_files(self, environment_id: str, path: str = "",
+                   recursive: bool = True) -> list[dict]:
+        """Metadata for the entries in an environment directory."""
+        raw = _send("GET", self._files_url(environment_id, path,
+                                           recursive=recursive),
+                    self._api_key, self._timeout)
+        return json.loads(raw.decode("utf-8")).get("files", [])
+
+    def download_to(self, environment_id: str, path: str, dest: str,
+                    recursive: bool = True) -> int:
+        """Download a directory (as tar) or a file to ``dest``.
+
+        Returns the number of bytes written. The destination's directory is
+        created if needed.
+        """
+        raw = _send("GET", self._files_url(environment_id, path,
+                                           media=True, recursive=recursive),
+                    self._api_key, self._timeout)
+        parent = os.path.dirname(os.path.abspath(dest))
+        os.makedirs(parent, exist_ok=True)
+        with open(dest, "wb") as fh:
+            fh.write(raw)
+        return len(raw)
