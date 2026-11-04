@@ -94,25 +94,38 @@ repositorio siempre runnable.
 
 **Aceptación cumplida:** el ciclo E3 corre por código de producto.
 
-## WU-4 — Task Planner + CLI + state (0.5.0)
-- `remote_worker/planner.py`:
-  - contrato de worker (template `system_instruction`),
-  - selección de modelo (solo argon/3.8-flash; reject explícito de lo demás),
-  - presupuesto por defecto + `max_total_tokens`.
-- `remote_worker/cli.py` (entrypoint `remote-worker`):
-  - `run <tarea> --repo <url> [--model] [--budget] [--branch-prefix worker/]`
-  - `status`, `continue <task_id> --budget` (para `incomplete`), `cancel`
-  - salida legible: estado, tokens usados, branch creada, diff summary,
-    resultado de tests.
-- `remote_worker/state.py`: estado JSON `0600` en
-  `~/.remote-worker/<project>/state.json` (patrón de `~/.agy-bridge/`).
-- Tests:
-  - 1 test por comando (help, reject de modelo no permitido, parseo de
-    presupuesto, estado del state file).
-  - 1 test de que `incomplete` produce `continue` sugerido y no error.
-- **Aceptación:** `remote-worker run "agregá multiply..." --repo
-  https://github.com/albertopo94/worker-poc-toy` termina con branch local,
-  diff y tests — el producto mínimo usable.
+## WU-4 — Task Planner + CLI + state (0.5.0) ✅ COMPLETO
+
+**Entregado:**
+- `remote_worker/planner.py` — `agent_config()` con piso de modelos
+  (`gemini-4-argon`, `gemini-3.8-flash`; el resto se rechaza, nunca se degrada
+  en silencio) y `max_total_tokens` siempre explícito; `worker_contract()` con
+  rol delegado, nombre real de las tools de memoria, precedencia del
+  `AGENTS.md`, formato de reporte y prohibición de push.
+- `remote_worker/state.py` — `TaskStore` con JSON privado (0600) en
+  `~/.remote-worker/<project>/state.json`; merge por `task_id`, listado newest
+  first, `KeyError` en id desconocido.
+- `remote_worker/runner.py` — `TaskRunner` (glue): crea la interacción con
+  source + contrato + tools, corre el loop, descarga, aplica a branch, corre
+  los tests del proyecto y registra todo en el store. Clientes **lazy**, así
+  `status`/`cancel` funcionan sin API key.
+- `remote_worker/cli.py` — `run`, `status`, `continue`, `cancel`, `--version`.
+  `incomplete` sale con rc 0 y sugiere el comando exacto para continuar; un
+  modelo por debajo del piso es error de uso (rc 2) antes de tocar la red.
+- **Tests:** 24 nuevos (12 de planner/state, 9 de CLI, 2 de paths, 1 de
+  memoria degradada). Suite total: 53/53.
+- **Smoke real verificado por CLI:**
+  `remote-worker run "add divide(a,b)..." --repo .../worker-poc-toy` →
+  `status: completed`, 107.105 de 200.000 tokens, branch
+  `worker/worker-poc-toy-1793818082`, diff `M main.py` + `M tests/test_main.py`
+  con `divide` y `ValueError` en cero, `tests: pass`.
+- **Dos defectos reales encontrados por ese smoke** (y arreglados con test):
+  (1) un fallo de memoria abortaba la tarea con traceback → ahora responde
+  `{ok: false, error}` y el worker degrada; (2) el clon vivía en el temp dir
+  de la sesión → ahora en `~/.remote-worker/<project>/work`, reanudable.
+
+**Aceptación cumplida:** `remote-worker run ...` termina con branch local,
+diff y tests.
 
 ## WU-5 — Setup + docs + primera release (0.6.0)
 - `remote-worker setup`: escribe config del usuario (key location, modelo
