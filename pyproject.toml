@@ -10,5 +10,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 
+[project.scripts]
+remote-worker = "remote_worker.cli:main"
+
 [tool.setuptools]
 packages = ["remote_worker"]
