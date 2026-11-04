@@ -82,7 +82,11 @@ git diff main
 | Command | What it does |
 |---|---|
 | `setup` | Store the default model and budget (`0600`, previous file backed up) |
-| `run "<task>" --repo <url>` | Delegate one task, bring the result back |
+| `setup --install-skill` | Install the remote-worker skill for gentle-shell-compatible agents |
+| `setup --list-skill-backups` | List recoverable versions of the skill |
+| `setup --restore-skill` | Restore the skill from its most recent backup (factory reset if it was the zero state) |
+| `run "<task>" --repo <url>` | Delegate one CODE task, bring the diff back |
+| `ask "<task>"` | Delegate a NON-code task, get the text back (no repo mounted) |
 | `status [task_id]` | List tasks, or show one (works offline, no key needed) |
 | `continue <task_id>` | Resume a task that reached its budget |
 | `cancel <task_id>` | Stop tracking a task locally |

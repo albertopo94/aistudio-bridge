@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.7.0] — 2026-11-04
+
+### Added
+
+- `remote-worker ask "<task>"`: delegate a NON-code task (research, analysis,
+  generation) and get the worker's text back. No repository is mounted, no
+  workspace is downloaded; memory callbacks still resolve locally. This is
+  the mode for offloading token cost from the local model to Google's free
+  tier, or simply using the agent for everything it can do.
+- Skill installer: `remote-worker setup --install-skill` writes a
+  gentle-shell-compatible skill (delegation rubric included) into
+  `~/.agents/skills/remote-worker/SKILL.md`, with timestamped backups, a
+  zero-state marker for the first install, `--list-skill-backups` and
+  `--restore-skill` (factory reset when restoring the zero state). The
+  backup/restore/factory-reset shape mirrors agy-model-bridge.
+- TODO (documented in the plan): `ask` with an optional mounted repo
+  (analysis without diff), multi-agent support (codex, claude-code,
+  opencode), streaming SSE, private repositories, ADR 0001.
+
 ## [0.6.0] — 2026-11-04
 
 ### Added
