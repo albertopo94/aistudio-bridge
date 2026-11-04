@@ -41,25 +41,32 @@ repositorio siempre runnable.
 
 **Aceptación cumplida:** tests verdes; smoke real muestra status + tokens.
 
-## WU-2 — Memory Adapter + bucle de function loop (0.3.0)
+## WU-2 — Memory Adapter + bucle de function loop (0.3.0) ✅ COMPLETO
+
+**Entregado:**
 - `remote_worker/engram_adapter.py`:
-  - `MemoryBackend` que ejecuta `engram search/save/context/session-summary`
-    por subprocess con `project` **fijado por el orquestador** (el worker no
-    elige proyecto).
-  - `dispatch(function_call) -> str`: valida el name, ejecuta, devuelve
-    **string JSON** (regla probada: array → 400).
-  - Allowlist de tools de memoria permitidas (subset `agent` de Engram).
-- `remote_worker/function_loop.py`: el bucle `requires_action` → dispatch →
-  `function_result` → repeat, con:
-  - detección de calls pendientes (steps sin `function_result`),
-  - límite de iteraciones (defensa contra loops),
-  - `max_total_tokens` respetado al re-crear la interacción.
-- Tests:
-  - 1 test por regla de dispatch (proyecto fijo, string JSON, allowlist).
-  - 1 test del bucle con fake server que devuelve `requires_action` dos veces
-    y luego `completed` (el scenario real del PoC).
-- **Aceptación:** el scenario del E2 (memoria real) replica lo del PoC pero
-  por código de producto, no por script.
+  - `EngramMemory(project, binary, runner, timeout)` — ejecuta el CLI de
+    Engram por subprocess; **fija el proyecto en cada llamada**.
+  - `MemoryDispatcher.dispatch(call) -> str` — devuelve **JSON string**
+    (nunca array: la API lo rechaza con 400). Descarta cualquier `project`
+    que invente el worker.
+  - Allowlist `ALLOWED_TOOLS = {memory_search, memory_save, memory_context}`;
+    las operaciones admin (delete/prune/merge) son inalcanzables.
+  - `EngramError` con el stderr real; `UnknownToolError` para tools fuera
+    de la allowlist.
+- `remote_worker/function_loop.py`:
+  - `pending_calls(interaction)` — una call está pendiente solo si ningún
+    `function_result` lleva su id (la API ecoa los pasos anteriores).
+  - `run_until_complete(client, dispatcher, interaction, max_steps=10)` —
+    responde los callbacks y reanuda con `previous_interaction_id`,
+    `environment` y `agent`; `LoopLimitExceeded` acota el bucle y
+    `NoPendingCallsError` corta un `requires_action` vacío.
+- **Tests:** 13 nuevos (6 de adapter, 7 de loop). Suite total: 19/19 verde.
+- **Smoke real verificado:** el escenario del E2 por código de producto —
+  `requires_action` → dispatch local contra el Engram real → `completed`,
+  respuesta `SOL-VERDE-77`, 5.286 tokens.
+
+**Aceptación cumplida:** el scenario E2 se replica con código de producto.
 
 ## WU-3 — Workspace Sync ida y vuelta (0.4.0)
 - `remote_worker/sync.py`:
