@@ -87,6 +87,7 @@ git diff main
 | `setup --restore-skill` | Restore the skill from its most recent backup (factory reset if it was the zero state) |
 | `run "<task>" --repo <url>` | Delegate one CODE task, bring the diff back |
 | `ask "<task>"` | Delegate a NON-code task, get the text back (no repo mounted) |
+| `ask "<task>" --stream` | Same, but print the worker's text live as it is generated |
 | `status [task_id]` | List tasks, or show one (works offline, no key needed) |
 | `continue <task_id>` | Resume a task that reached its budget |
 | `cancel <task_id>` | Stop tracking a task locally |

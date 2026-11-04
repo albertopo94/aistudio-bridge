@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.8.0] — 2026-11-04
+
+### Added
+
+- Live streaming (SSE) for `remote-worker ask --stream`: the worker's text
+  is printed as it is generated instead of waiting silently for the full
+  round trip. Verified against the real API. Non-streaming calls are
+  unchanged.
+
 ## [0.7.0] — 2026-11-04
 
 ### Added
