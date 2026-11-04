@@ -67,10 +67,16 @@ def build_parser() -> argparse.ArgumentParser:
                      help=f"one of: {', '.join(planner.ALLOWED_MODELS)}")
     ask.add_argument("--budget", type=int, default=None)
 
-    setup = sub.add_parser("setup", help="store default model and budget")
+    setup = sub.add_parser("setup", help="store defaults and install the skill")
     setup.add_argument("--model", default=None,
                        help=f"one of: {', '.join(planner.ALLOWED_MODELS)}")
     setup.add_argument("--budget", type=int, default=None)
+    setup.add_argument("--install-skill", action="store_true",
+                       help="write the remote-worker skill into the agent config")
+    setup.add_argument("--restore-skill", action="store_true",
+                       help="restore the skill from its most recent backup")
+    setup.add_argument("--list-skill-backups", action="store_true",
+                       help="list the skill backups")
 
     return parser
 
@@ -123,7 +129,18 @@ def main(argv=None, *, runner=None) -> int:
             ))
         if args.command == "setup":
             from .config import save_config
+            from .skill_installer import install_skill, restore_skill, list_backups
 
+            if args.list_skill_backups:
+                for b in list_backups():
+                    print(b)
+                return 0
+            if args.install_skill:
+                print("wrote", install_skill())
+                return 0
+            if args.restore_skill:
+                print("restored", restore_skill())
+                return 0
             _check_model(parser, args.model, args.budget)
             path = save_config(model=args.model, budget=args.budget)
             print(f"wrote {path}")
