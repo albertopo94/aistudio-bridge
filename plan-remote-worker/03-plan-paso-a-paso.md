@@ -20,22 +20,26 @@ repositorio siempre runnable.
 - **Aceptación:** `python3 -m unittest discover` corre (0 tests, exit 0);
   README explica el producto en una página; `git log` muestra el primer commit.
 
-## WU-1 — Google Adapter: una interacción (0.2.0)
-- `remote_worker/__init__.py`, `remote_worker/google_client.py`:
-  - `class InteractionsClient`: stdlib `urllib`, key desde env `GEMINI_API_KEY`
-    (nunca en args/logs), timeout configurable.
-  - `create_interaction(agent, input, environment, agent_config, tools,
-    system_instruction, previous_interaction_id) -> dict`.
-  - `last_model_output(interaction) -> str` (lee el último step `model_output`).
-  - `usage(interaction) -> dict`.
-- Tests con **fake HTTP server local** (stdlib `http.server` en un thread,
-  como hicieron los tests del PoC de agy-model-bridge):
-  - 1 test por regla: payload exacto (no envía la key fuera del header),
-    parseo de `model_output` (no `output_text`), manejo de 429 (sin retry
-    automático, reporta), timeout.
-- **Aceptación:** tests verdes; un smoke script (fuera de tests) que lanza una
-  tarea trivial real contra la API y muestra status + tokens (requiere key,
-  no corre en CI).
+## WU-1 — Google Adapter: una interacción (0.2.0) ✅ COMPLETO
+
+**Entregado** (`remote_worker/google_client.py`, 130 líneas, stdlib pura):
+- `InteractionsClient(api_key, base_url, timeout)` — key solo en header
+  `x-goog-api-key`, nunca en body ni en mensajes de error.
+- `create_interaction(agent, input, environment, agent_config, tools,
+  system_instruction, previous_interaction_id)` — envía solo los campos
+  declarados; los `None` se omiten.
+- `last_model_output(interaction)` — lee el **último** step `model_output`,
+  no `output_text` (gotcha del PoC, con test que lo prueba).
+- `usage(interaction)` — conteos de tokens.
+- `InteractionsError(status, body)` — 429/4xx reportados con el cuerpo exacto,
+  **sin retry automático** (test: exactamente 1 request).
+- `InteractionsTimeoutError` — timeout claro, nunca cuelga.
+- **Tests:** 5 tests contra fake HTTP server local (`tests/fake_interactions.py`)
+  + 1 test base. Suite: 6/6 verde.
+- **Smoke real verificado:** interacción completa contra la API, `status:
+  completed`, 39.414 tokens, output correcto.
+
+**Aceptación cumplida:** tests verdes; smoke real muestra status + tokens.
 
 ## WU-2 — Memory Adapter + bucle de function loop (0.3.0)
 - `remote_worker/engram_adapter.py`:

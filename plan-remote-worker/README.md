@@ -47,7 +47,9 @@ como branch con diff verificable.
 
 - Investigación: completa (documento base: `investigacion-google-antigravity-engram-gentle-ai.md`).
 - PoC: 7/7 pasos PASS (Ruta A 1-5 + Fase 2 E1-E3). Evidencia en `poc/`.
-- Producto: pre-código. El primer work unit empieza en `03-plan-paso-a-paso.md`.
+- Producto: **WU-0 y WU-1 completos (v0.1.0 → v0.2.0)**. Existe
+  `remote_worker/google_client.py` (cliente de Interactions API, stdlib, con
+  tests contra fake HTTP server y smoke real verificado). Sigue WU-2.
 
 ## Referencias de memoria (Engram, proyecto aistudio-bridge)
 
