@@ -79,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="restore the skill from its most recent backup")
     setup.add_argument("--list-skill-backups", action="store_true",
                        help="list the skill backups")
+    setup.add_argument("--api-key", default=None,
+                       help="store the Gemini API key (interactive prompt if omitted)")
 
     return parser
 
@@ -131,7 +133,7 @@ def main(argv=None, *, runner=None) -> int:
                 task_id=args.task_id, budget=args.budget,
             ))
         if args.command == "setup":
-            from .config import save_config
+            from .config import load_config, save_config
             from .skill_installer import install_skill, restore_skill, list_backups
 
             if args.list_skill_backups:
@@ -145,8 +147,16 @@ def main(argv=None, *, runner=None) -> int:
                 print("restored", restore_skill())
                 return 0
             _check_model(parser, args.model, args.budget)
-            path = save_config(model=args.model, budget=args.budget)
+            api_key = args.api_key or _prompt_for_key(parser)
+            path = save_config(model=args.model, budget=args.budget,
+                               api_key=api_key)
             print(f"wrote {path}")
+            if api_key:
+                print("api key stored (file is private: 0600)")
+            else:
+                existing = load_config().get("api_key")
+                if existing:
+                    print("api key: kept the previously stored one")
             return 0
         if args.command == "cancel":
             task = runner.cancel(args.task_id)
@@ -163,6 +173,21 @@ def main(argv=None, *, runner=None) -> int:
     return 0
 
 
+def _prompt_for_key(parser) -> str | None:
+    """Ask for the API key once, hidden, when none is stored yet."""
+    import getpass
+
+    from .config import load_config
+
+    if load_config().get("api_key"):
+        return None  # keep it; do not ask again
+    print("No stored API key. Paste your Gemini API key (input is hidden).")
+    key = getpass.getpass("API key: ").strip()
+    if not key:
+        return None
+    return key
+
+
 def _check_model(parser, model, budget) -> None:
     """Fail as a usage error, before any network call."""
     try:
@@ -174,10 +199,15 @@ def _check_model(parser, model, budget) -> None:
 def _build_runner(parser, args):
     from .runner import TaskRunner
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+    from .config import resolve_api_key
+
     needs_key = getattr(args, "command", None) in ("run", "ask", "continue")
+    api_key = resolve_api_key() or ""
     if needs_key and not api_key:
-        parser.error("GEMINI_API_KEY is not set")
+        parser.error(
+            "no API key found: set GEMINI_API_KEY or run "
+            "'remote-worker setup' once"
+        )
     project = getattr(args, "project", None) or _guess_project(args)
     return TaskRunner(project=project, api_key=api_key)
 
