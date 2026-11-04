@@ -139,9 +139,7 @@ class TaskRunner:
         )
         # The diff the user reviews must not contain artifacts that the test
         # run will add, so the tests run against a throwaway copy.
-        tests_clone = applied["clone_dir"] + ".tests"
-        shutil.copytree(applied["clone_dir"], tests_clone,
-                        ignore=shutil.ignore_patterns(".git"))
+        tests_clone = self._prepare_tests_clone(applied["clone_dir"])
         tests_rc, tests_output = run_tests(tests_clone, DEFAULT_TEST_COMMAND)
         result.update({
             "clone_dir": applied["clone_dir"],
@@ -158,6 +156,18 @@ class TaskRunner:
             "tests_rc": tests_rc,
         })
         return result
+
+    def _prepare_tests_clone(self, clone_dir: str) -> str:
+        """A fresh copy of the clone to run the tests in.
+
+        A previous run may have left a stale clone.tests; it is removed
+        first so the copy is always clean and never merged with leftovers.
+        """
+        tests_clone = clone_dir + ".tests"
+        shutil.rmtree(tests_clone, ignore_errors=True)
+        shutil.copytree(clone_dir, tests_clone,
+                        ignore=shutil.ignore_patterns(".git"))
+        return tests_clone
 
     def continue_task(self, *, task_id: str,
                       budget: int | None = None) -> dict:
