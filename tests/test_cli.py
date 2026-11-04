@@ -145,3 +145,23 @@ class TestProjectDefault(unittest.TestCase):
                                  os.path.basename(tmp))
             finally:
                 os.chdir(previous)
+
+
+class TestOfflineCommands(unittest.TestCase):
+    """Reading local state must not require an API key."""
+
+    def setUp(self):
+        if cli is None:
+            self.fail("RED: remote_worker.cli not implemented yet")
+
+    def test_status_needs_no_api_key(self):
+        import os
+
+        saved = os.environ.pop("GEMINI_API_KEY", None)
+        try:
+            code, _, err = invoke(["status"], None)
+        finally:
+            if saved is not None:
+                os.environ["GEMINI_API_KEY"] = saved
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("GEMINI_API_KEY", err)

@@ -36,8 +36,11 @@ class TaskRunner:
                  workdir: str | None = None,
                  memory_enabled: bool = True):
         self.project = project
-        self.client = client or InteractionsClient(api_key=api_key)
-        self.files = files or FilesClient(api_key=api_key)
+        # Clients are created on first use: reading local task state must not
+        # need an API key.
+        self._api_key = api_key
+        self._client = client
+        self._files = files
         self.store = store or TaskStore(project=project)
         # Stable across sessions so a recorded task can be resumed later;
         # the process temp directory would not survive a restart.
@@ -48,6 +51,18 @@ class TaskRunner:
             EngramMemory(project=project)
         )
         self.memory_enabled = memory_enabled
+
+    @property
+    def client(self):
+        if self._client is None:
+            self._client = InteractionsClient(api_key=self._api_key)
+        return self._client
+
+    @property
+    def files(self):
+        if self._files is None:
+            self._files = FilesClient(api_key=self._api_key)
+        return self._files
 
     def run(self, *, task: str, repo_url: str, model: str | None = None,
             budget: int | None = None,

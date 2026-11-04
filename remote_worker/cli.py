@@ -120,7 +120,8 @@ def _build_runner(parser, args):
     from .runner import TaskRunner
 
     api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key:
+    needs_key = getattr(args, "command", None) in ("run", "continue")
+    if needs_key and not api_key:
         parser.error("GEMINI_API_KEY is not set")
     project = getattr(args, "project", None) or _guess_project(args)
     return TaskRunner(project=project, api_key=api_key)
