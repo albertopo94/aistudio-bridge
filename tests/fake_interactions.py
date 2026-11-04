@@ -17,6 +17,7 @@ class FakeInteractionsServer:
         self.requests = []  # list of dicts: {path, headers, body}
         self.reply_status = 200
         self.reply_body = {"id": "v1_test", "status": "completed", "steps": [], "usage": {}}
+        self.replies = []  # optional queue of (status, body); consumed per request
         self.reply_delay = 0.0  # seconds; used to force client timeouts
         self._server = None
         self._thread = None
@@ -39,8 +40,12 @@ class FakeInteractionsServer:
                 if outer.reply_delay:
                     import time
                     time.sleep(outer.reply_delay)
-                payload = json.dumps(outer.reply_body).encode("utf-8")
-                self.send_response(outer.reply_status)
+                if outer.replies:
+                    status, body = outer.replies.pop(0)
+                else:
+                    status, body = outer.reply_status, outer.reply_body
+                payload = json.dumps(body).encode("utf-8")
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()

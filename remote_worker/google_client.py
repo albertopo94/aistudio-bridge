@@ -47,12 +47,14 @@ class InteractionsClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
 
-    def create_interaction(self, *, agent: str, input: str,
+    def create_interaction(self, *, agent: str, input,
                            environment="remote", agent_config=None,
                            tools=None, system_instruction=None,
                            previous_interaction_id=None) -> dict:
         """Create one interaction and return the parsed interaction dict.
 
+        ``input`` is a string for a new turn, or a list of step dicts (for
+        example ``function_result`` entries) when resuming an interaction.
         Only the declared fields are sent; ``None`` values are omitted so
         the request body stays exact and reviewable.
         """
