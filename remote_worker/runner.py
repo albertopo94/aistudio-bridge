@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
 import time
 from urllib.parse import urlsplit
 
@@ -17,7 +16,7 @@ from .engram_adapter import EngramMemory, MemoryDispatcher
 from .function_loop import run_until_complete
 from .google_client import FilesClient, InteractionsClient
 from .planner import agent_config, worker_contract
-from .state import TaskStore
+from .state import DEFAULT_ROOT, TaskStore, _slug
 from .sync import apply_to_branch, mount_repo, run_tests
 
 AGENT = "antigravity-preview-09-2026"
@@ -40,8 +39,10 @@ class TaskRunner:
         self.client = client or InteractionsClient(api_key=api_key)
         self.files = files or FilesClient(api_key=api_key)
         self.store = store or TaskStore(project=project)
+        # Stable across sessions so a recorded task can be resumed later;
+        # the process temp directory would not survive a restart.
         self.workdir = workdir or os.path.join(
-            tempfile.gettempdir(), "remote-worker"
+            DEFAULT_ROOT, _slug(project), "work"
         )
         self.dispatcher = dispatcher or MemoryDispatcher(
             EngramMemory(project=project)

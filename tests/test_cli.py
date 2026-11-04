@@ -123,3 +123,25 @@ class TestCli(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestProjectDefault(unittest.TestCase):
+    """The default Engram project is the directory the user runs in."""
+
+    def setUp(self):
+        if cli is None:
+            self.fail("RED: remote_worker.cli not implemented yet")
+
+    def test_default_project_is_cwd_not_repo_name(self):
+        import argparse
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            previous = os.getcwd()
+            os.chdir(tmp)
+            try:
+                args = argparse.Namespace(repo="https://x/worker-poc-toy")
+                self.assertEqual(cli._guess_project(args),
+                                 os.path.basename(tmp))
+            finally:
+                os.chdir(previous)

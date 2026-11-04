@@ -169,19 +169,29 @@ class MemoryDispatcher:
         # The orchestrator owns the project: ignore anything the worker sent.
         arguments.pop("project", None)
 
-        if name == "memory_search":
-            content = self._memory.search(
-                arguments.get("query", ""),
-                limit=int(arguments.get("limit", 5)),
-            )
-        elif name == "memory_save":
-            content = self._memory.save(
-                arguments.get("title", ""),
-                arguments.get("content", ""),
-                type=arguments.get("type", "discovery"),
-            )
-        else:  # memory_context
-            content = self._memory.context(arguments.get("scope"))
+        try:
+            if name == "memory_search":
+                content = self._memory.search(
+                    arguments.get("query", ""),
+                    limit=int(arguments.get("limit", 5)),
+                )
+            elif name == "memory_save":
+                content = self._memory.save(
+                    arguments.get("title", ""),
+                    arguments.get("content", ""),
+                    type=arguments.get("type", "discovery"),
+                )
+            else:  # memory_context
+                content = self._memory.context(arguments.get("scope"))
+        except EngramError as exc:
+            # A broken or unknown local store must inform the worker, not
+            # abort the task: the worker can report "memory unavailable" and
+            # keep working with what it has.
+            return json.dumps({
+                "ok": False,
+                "tool": name,
+                "error": str(exc),
+            })
 
         return json.dumps({
             "ok": True,

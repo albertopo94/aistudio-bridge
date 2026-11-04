@@ -127,10 +127,12 @@ def _build_runner(parser, args):
 
 
 def _guess_project(args) -> str:
-    from .runner import _repo_name
+    """Default to the directory the user runs in, not the remote repo name.
 
-    repo = getattr(args, "repo", None)
-    return _repo_name(repo) if repo else "default"
+    Engram identifies a project by the working directory; the repo mounted in
+    the sandbox is usually a *different* checkout and rarely a match.
+    """
+    return os.path.basename(os.getcwd()) or "default"
 
 
 def _report_run(result: dict) -> int:

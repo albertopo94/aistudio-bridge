@@ -132,3 +132,25 @@ class TestMemoryDispatcher(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestMemoryFailureReporting(unittest.TestCase):
+    """A broken local store must inform the worker, not kill the task."""
+
+    def setUp(self):
+        if EngramMemory is None:
+            self.fail("RED: remote_worker.engram_adapter not implemented yet")
+
+    def test_memory_failure_is_reported_not_raised(self):
+        def boom(argv):
+            raise EngramError("engram: unknown project: missing")
+
+        dispatcher = MemoryDispatcher(EngramMemory(project="missing",
+                                                   runner=boom))
+        result = dispatcher.dispatch({
+            "type": "function_call", "name": "memory_search",
+            "id": "call_1", "arguments": {"query": "anything"},
+        })
+        self.assertIsInstance(result, str)
+        payload = json.loads(result)
+        self.assertFalse(payload["ok"])
+        self.assertIn("unknown project", payload["error"])
