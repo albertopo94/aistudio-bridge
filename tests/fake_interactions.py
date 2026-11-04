@@ -20,6 +20,7 @@ class FakeInteractionsServer:
         self.replies = []  # optional queue of (status, body); consumed per request
         self.reply_bytes = b""  # what GET returns
         self.reply_delay = 0.0  # seconds; used to force client timeouts
+        self.sse_events = None  # optional list of dicts -> SSE stream (alt=sse)
         self._server = None
         self._thread = None
 
@@ -56,6 +57,23 @@ class FakeInteractionsServer:
                 if outer.reply_delay:
                     import time
                     time.sleep(outer.reply_delay)
+                # SSE path: when the client asked for streaming (alt=sse in the
+                # query) and the test configured sse_events, emit them as a
+                # server-sent-events body and stop.
+                if "alt=sse" in self.path and outer.sse_events is not None:
+                    chunks = []
+                    for ev in outer.sse_events:
+                        ev_type = ev.get("event_type", "")
+                        chunks.append(f"event: {ev_type}\n")
+                        chunks.append("data: " + json.dumps(ev) + "\n\n")
+                    chunks.append("event: done\ndata: [DONE]\n\n")
+                    payload = "".join(chunks).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
                 if outer.replies:
                     status, body = outer.replies.pop(0)
                 else:

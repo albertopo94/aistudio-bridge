@@ -118,6 +118,69 @@ class InteractionsClient:
         )
         return json.loads(raw.decode("utf-8"))
 
+    def stream_interaction(self, *, agent: str, input,
+                           environment="remote", agent_config=None,
+                           tools=None, system_instruction=None,
+                           on_delta=None) -> dict:
+        """Stream one interaction over SSE and return the final interaction.
+
+        Sends `stream: true` and requests `alt=sse`. For each text delta the
+        optional ``on_delta`` callback is invoked with the incremental text.
+        Returns the interaction from the `interaction.completed` event (which
+        carries the final `usage`). Raises `InteractionsError` on an `error`
+        event.
+        """
+        body = {"agent": agent, "input": input, "stream": True}
+        if environment is not None:
+            body["environment"] = environment
+        if agent_config is not None:
+            body["agent_config"] = agent_config
+        if tools is not None:
+            body["tools"] = tools
+        if system_instruction is not None:
+            body["system_instruction"] = system_instruction
+
+        data = json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(
+            self._base_url + "/v1beta/interactions?alt=sse",
+            data=data, method="POST",
+            headers={"Content-Type": "application/json",
+                     "x-goog-api-key": self._api_key},
+        )
+        try:
+            resp = urllib.request.urlopen(request, timeout=self._timeout)
+        except TimeoutError as exc:
+            raise InteractionsTimeoutError(
+                f"timeout: no response after {self._timeout}s streaming") from exc
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            raise InteractionsError(exc.code, raw) from exc
+
+        final = None
+        pending_data = ""
+        with resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                if line.startswith("data:"):
+                    pending_data = line[len("data:"):].strip()
+                    if pending_data == "[DONE]":
+                        break
+                    ev = json.loads(pending_data)
+                    if ev.get("event_type") == "step.delta":
+                        delta = ev.get("delta", {})
+                        if delta.get("type") == "text" and on_delta:
+                            on_delta(delta.get("text", ""))
+                    elif ev.get("event_type") == "interaction.completed":
+                        final = ev.get("interaction")
+                    elif ev.get("event_type") == "error":
+                        err = ev.get("error", {})
+                        raise InteractionsError(0, err.get("message", "error"))
+        if final is None:
+            raise InteractionsError(0, "stream ended without interaction.completed")
+        return final
+
     def last_model_output(self, interaction: dict) -> str:
         """Return the text of the LAST ``model_output`` step.
 

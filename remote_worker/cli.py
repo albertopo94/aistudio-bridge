@@ -66,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--model", default=None,
                      help=f"one of: {', '.join(planner.ALLOWED_MODELS)}")
     ask.add_argument("--budget", type=int, default=None)
+    ask.add_argument("--stream", action="store_true",
+                     help="stream the worker's progress live")
 
     setup = sub.add_parser("setup", help="store defaults and install the skill")
     setup.add_argument("--model", default=None,
@@ -107,6 +109,7 @@ def main(argv=None, *, runner=None) -> int:
             _check_model(parser, model, budget)
             return _report_ask(runner.ask(
                 task=args.task, model=model, budget=budget,
+                stream=getattr(args, "stream", False),
             ))
         if args.command == "run":
             from .config import load_config

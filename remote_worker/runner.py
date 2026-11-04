@@ -218,7 +218,8 @@ class TaskRunner:
         })
         return {**record, **updated}
     def ask(self, task: str, *, model: str | None = None,
-            budget: int | None = None, project: str | None = None) -> dict:
+            budget: int | None = None, project: str | None = None,
+            stream: bool = False) -> dict:
         """Delegate a NON-code task and return the worker's text.
 
         Unlike :meth:`run`, ask does NOT mount a repository and does NOT
@@ -237,17 +238,31 @@ class TaskRunner:
         if self.memory_enabled:
             tools.extend(self.dispatcher.tool_specs())
 
-        interaction = self.client.create_interaction(
-            agent=AGENT,
-            input=task,
-            environment="remote",
-            agent_config=config,
-            system_instruction=worker_contract(
-                project=proj, repo_dir="(no repository mounted)",
-                memory_tools=self.memory_enabled,
-            ),
-            tools=tools,
-        )
+        if stream:
+            interaction = self.client.stream_interaction(
+                agent=AGENT,
+                input=task,
+                environment="remote",
+                agent_config=config,
+                system_instruction=worker_contract(
+                    project=proj, repo_dir="(no repository mounted)",
+                    memory_tools=self.memory_enabled,
+                ),
+                tools=tools,
+                on_delta=lambda t: print(t, end="", flush=True),
+            )
+        else:
+            interaction = self.client.create_interaction(
+                agent=AGENT,
+                input=task,
+                environment="remote",
+                agent_config=config,
+                system_instruction=worker_contract(
+                    project=proj, repo_dir="(no repository mounted)",
+                    memory_tools=self.memory_enabled,
+                ),
+                tools=tools,
+            )
         self.store.record({
             "task_id": task_id, "kind": "ask",
             "status": interaction.get("status"),
