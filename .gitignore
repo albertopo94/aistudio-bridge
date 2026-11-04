@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+poc/.env
+poc/state.env
+poc/logs/
+poc/e3-work/
+remote-worker/
