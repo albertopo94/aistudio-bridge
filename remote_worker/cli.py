@@ -40,10 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="delegate one task")
     run.add_argument("task", help="the task, in plain language")
     run.add_argument("--repo", required=True, help="repository URL to mount")
-    run.add_argument("--model", default=planner.DEFAULT_MODEL,
-                     help=f"one of: {', '.join(planner.ALLOWED_MODELS)}")
-    run.add_argument("--budget", type=int, default=planner.DEFAULT_BUDGET,
-                     help="max total tokens for the task")
+    run.add_argument("--model", default=None,
+                     help=f"one of: {', '.join(planner.ALLOWED_MODELS)} "
+                          "(default: stored config)")
+    run.add_argument("--budget", type=int, default=None,
+                     help="max total tokens for the task "
+                          "(default: stored config)")
     run.add_argument("--branch", default=None,
                      help="local branch name for the result")
     run.add_argument("--project", default=None,
@@ -58,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     cancel = sub.add_parser("cancel", help="stop tracking a task")
     cancel.add_argument("task_id")
+
+    setup = sub.add_parser("setup", help="store default model and budget")
+    setup.add_argument("--model", default=None,
+                       help=f"one of: {', '.join(planner.ALLOWED_MODELS)}")
+    setup.add_argument("--budget", type=int, default=None)
 
     return parser
 
@@ -80,10 +87,15 @@ def main(argv=None, *, runner=None) -> int:
 
     try:
         if args.command == "run":
-            _check_model(parser, args.model, args.budget)
+            from .config import load_config
+
+            stored = load_config()
+            model = args.model or stored["model"]
+            budget = args.budget or stored["budget"]
+            _check_model(parser, model, budget)
             return _report_run(runner.run(
-                task=args.task, repo_url=args.repo, model=args.model,
-                budget=args.budget, branch=args.branch,
+                task=args.task, repo_url=args.repo, model=model,
+                budget=budget, branch=args.branch,
             ))
         if args.command == "status":
             return _report_status(runner.status(args.task_id))
@@ -93,6 +105,13 @@ def main(argv=None, *, runner=None) -> int:
             return _report_run(runner.continue_task(
                 task_id=args.task_id, budget=args.budget,
             ))
+        if args.command == "setup":
+            from .config import save_config
+
+            _check_model(parser, args.model, args.budget)
+            path = save_config(model=args.model, budget=args.budget)
+            print(f"wrote {path}")
+            return 0
         if args.command == "cancel":
             task = runner.cancel(args.task_id)
             print(f"canceled: {task['task_id']} (local tracking only)")

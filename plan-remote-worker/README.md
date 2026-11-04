@@ -47,11 +47,11 @@ como branch con diff verificable.
 
 - Investigación: completa (documento base: `investigacion-google-antigravity-engram-gentle-ai.md`).
 - PoC: 7/7 pasos PASS (Ruta A 1-5 + Fase 2 E1-E3). Evidencia en `poc/`.
-- Producto: **WU-0 a WU-4 completos (v0.1.0 → v0.5.0)**. El producto es
-  usable: `remote-worker run "..." --repo <url>` delega la tarea, baja el
-  resultado a una branch local, corre los tests del proyecto y reporta tokens.
-  53 tests contra fake HTTP server; round trip real verificado dos veces
-  contra `worker-poc-toy`. Sigue WU-5 (setup + docs + primera release).
+- Producto: **WU-0 a WU-5 completos (v0.1.0 → v0.6.0)**. Producto mínimo
+  usable y documentado: `setup`, `run`, `status`, `continue`, `cancel`.
+  57 tests contra fake HTTP server; round trip real verificado dos veces
+  contra `worker-poc-toy`. Sigue la fase 2 (SSE, repos privados, background)
+  cuando se decida.
 - Repo público: <https://github.com/albertopo94/aistudio-bridge>
 
 ## Referencias de memoria (Engram, proyecto aistudio-bridge)

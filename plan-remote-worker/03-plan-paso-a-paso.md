@@ -127,18 +127,26 @@ repositorio siempre runnable.
 **Aceptación cumplida:** `remote-worker run ...` termina con branch local,
 diff y tests.
 
-## WU-5 — Setup + docs + primera release (0.6.0)
-- `remote-worker setup`: escribe config del usuario (key location, modelo
-  default, presupuesto default) con backups timestamped (patrón de
-  agy-model-bridge).
-- `README.md` completo: instalación, first-run, ejemplo real con
-  `worker-poc-toy`, límites (500 MB, RPD, 7 días), seguridad.
-- `docs/adr/0001-standalone-product.md` (decisión opción A, contexto y
-  consecuencias) — **recordatorio al humano** de que la ADR la firme él
-  (AGENTS.md §9: no la escribo yo en silencio).
-- CHANGELOG 0.1.0→0.6.0.
-- **Aceptación:** un usuario nuevo con la key hace `setup` + `run` sin leer
-  código; todos los ADRs/READMEs citan evidencia real.
+## WU-5 — Setup + docs + primera release (0.6.0) ✅ COMPLETO
+
+**Entregado:**
+- `remote_worker/config.py` — `save_config` valida por el planner (el archivo
+  no puede contradecir el piso de modelos), escribe `0600` y deja backup
+  `config.json.bak-<timestamp>` antes de reemplazar; `load_config` cae a los
+  defaults del planner si falta o está corrupto.
+- `remote-worker setup [--model] [--budget]` — y `run` usa la config guardada
+  cuando no se pasa flag.
+- `README.md` completo: diagrama, por qué esta forma, requisitos, install,
+  first run con salida real, tabla de comandos, piso de modelos, límites
+  (500 MB, 15 min / 7 días, RPD), seguridad, desarrollo y documentación.
+- `CHANGELOG.md` 0.1.0 → 0.6.0 con los defectos corregidos por versión.
+- **Tests:** 4 nuevos de config. Suite total: 57/57.
+- **Smoke verificado:** `setup --model gemini-4-argon --budget 250000` escribe
+  el archivo `0600` con ese contenido; `setup --model gemini-2.5-flash` es
+  rechazado con rc 2 y los modelos permitidos listados.
+
+**Aceptación cumplida.** Pendiente de firma humana (AGENTS.md §9): la ADR
+`docs/adr/0001-standalone-product.md`, que **redacta el humano**, no el agente.
 
 ## Fase 2 (después del 0.6.0, decisiones separadas)
 - **Streaming SSE** (`?alt=sse`) para feedback en vivo.
