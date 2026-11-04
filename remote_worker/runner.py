@@ -217,3 +217,57 @@ class TaskRunner:
             "note": "canceled locally; the Google interaction may still finish",
         })
         return {**record, **updated}
+    def ask(self, task: str, *, model: str | None = None,
+            budget: int | None = None, project: str | None = None) -> dict:
+        """Delegate a NON-code task and return the worker's text.
+
+        Unlike :meth:`run`, ask does NOT mount a repository and does NOT
+        download a workspace: it is a pure text round trip. The worker may
+        still use Google Search, URL context, code execution and the memory
+        tools. This is the mode for "use Google for whatever I want" —
+        research, analysis, generation — and for offloading token cost from
+        the local model to the (free) Gemini tier.
+        """
+        config = agent_config(model=model, budget=budget)
+        proj = project or self.project
+        task_id = f"t_{int(time.time())}"
+
+        tools = [{"type": "code_execution"}, {"type": "google_search"},
+                 {"type": "url_context"}]
+        if self.memory_enabled:
+            tools.extend(self.dispatcher.tool_specs())
+
+        interaction = self.client.create_interaction(
+            agent=AGENT,
+            input=task,
+            environment="remote",
+            agent_config=config,
+            system_instruction=worker_contract(
+                project=proj, repo_dir="(no repository mounted)",
+                memory_tools=self.memory_enabled,
+            ),
+            tools=tools,
+        )
+        self.store.record({
+            "task_id": task_id, "kind": "ask",
+            "status": interaction.get("status"),
+            "interaction_id": interaction.get("id"),
+            "environment_id": interaction.get("environment_id"),
+            "model": config["model"], "budget": config["max_total_tokens"],
+            "task": task,
+        })
+
+        final = run_until_complete(self.client, self.dispatcher, interaction)
+        status = final.get("status")
+        tokens = self.client.usage(final).get("total_tokens")
+        text = self.client.last_model_output(final)
+        self.store.record({
+            "task_id": task_id, "status": status, "tokens": tokens,
+            "interaction_id": final.get("id"),
+            "environment_id": final.get("environment_id"),
+            "text": text,
+        })
+        return {
+            "task_id": task_id, "status": status, "tokens": tokens,
+            "budget": config["max_total_tokens"], "text": text,
+        }

@@ -61,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
     cancel = sub.add_parser("cancel", help="stop tracking a task")
     cancel.add_argument("task_id")
 
+    ask = sub.add_parser("ask", help="delegate a non-code task, get the text")
+    ask.add_argument("task", help="the task, in plain language")
+    ask.add_argument("--model", default=None,
+                     help=f"one of: {', '.join(planner.ALLOWED_MODELS)}")
+    ask.add_argument("--budget", type=int, default=None)
+
     setup = sub.add_parser("setup", help="store default model and budget")
     setup.add_argument("--model", default=None,
                        help=f"one of: {', '.join(planner.ALLOWED_MODELS)}")
@@ -86,6 +92,16 @@ def main(argv=None, *, runner=None) -> int:
         runner = _build_runner(parser, args)
 
     try:
+        if args.command == "ask":
+            from .config import load_config
+
+            stored = load_config()
+            model = args.model or stored["model"]
+            budget = args.budget or stored["budget"]
+            _check_model(parser, model, budget)
+            return _report_ask(runner.ask(
+                task=args.task, model=model, budget=budget,
+            ))
         if args.command == "run":
             from .config import load_config
 
@@ -139,7 +155,7 @@ def _build_runner(parser, args):
     from .runner import TaskRunner
 
     api_key = os.environ.get("GEMINI_API_KEY", "")
-    needs_key = getattr(args, "command", None) in ("run", "continue")
+    needs_key = getattr(args, "command", None) in ("run", "ask", "continue")
     if needs_key and not api_key:
         parser.error("GEMINI_API_KEY is not set")
     project = getattr(args, "project", None) or _guess_project(args)
@@ -195,6 +211,28 @@ def _report_run(result: dict) -> int:
         print(f"tests:  {verdict}")
     print("nothing was pushed; merge the branch when you are ready.")
     return 0 if tests_rc in (None, 0) else 1
+
+
+def _report_ask(result: dict) -> int:
+    status = result.get("status")
+    task_id = result.get("task_id")
+    print(f"task:   {task_id}")
+    print(f"status: {status}")
+    tokens = result.get("tokens")
+    budget = result.get("budget")
+    if tokens is not None:
+        suffix = f" of {budget}" if budget else ""
+        print(f"tokens: {tokens}{suffix}")
+    if status == "incomplete":
+        print("the agent reached its token budget; the task is incomplete.")
+        print(f"resume it with: remote-worker continue {task_id}")
+        return 0
+    if status != "completed":
+        print(result.get("text") or result.get("report") or "")
+        return 3
+    print()
+    print(result.get("text", ""))
+    return 0
 
 
 def _report_status(payload) -> int:
