@@ -68,24 +68,31 @@ repositorio siempre runnable.
 
 **Aceptación cumplida:** el scenario E2 se replica con código de producto.
 
-## WU-3 — Workspace Sync ida y vuelta (0.4.0)
+## WU-3 — Workspace Sync ida y vuelta (0.4.0) ✅ COMPLETO
+
+**Entregado:**
+- `remote_worker/google_client.py` → `FilesClient`: `list_files`
+  (`?recursive=true`) y `download_to` (`?alt=media&recursive=true`, endpoint
+  actual, no el `:download` deprecado). Comparte el camino de request con
+  `InteractionsClient` (key en header también en GET).
 - `remote_worker/sync.py`:
-  - `mount_repo(url, target) -> source dict` (repository source, 500 MB check
-    con aviso).
-  - `download_workspace(env_id, dir) -> tar path` (Files API, `?alt=media&
-    recursive=true`).
-  - `apply_to_branch(tar, repo_url, branch) -> (clone_dir, diff)`:
-    clone fresco, extract a scratch, **purgar `.git`/`__pycache__`, chmod**,
-    overlay, `git add -A`, `git diff --cached` (gotchas probados en E3).
-  - `run_tests(clone_dir, cmd)` — test suite del proyecto en el Mac.
-- Tests:
-  - 1 test de `apply_to_branch` con un **tar sintético** que incluye un
-    `.git` ajeno y un `__pycache__` con permisos raros → debe purgar y
-    aplicar limpio (el bug exacto del PoC).
-  - 1 test del payload del download (endpoint exacto, no el legacy
-    `:download` deprecado).
-- **Aceptación:** contra `worker-poc-toy`, el ciclo completo E3 corre por
-  código de producto: tarea → diff limpio en branch `worker/*` → tests en el Mac.
+  - `mount_repo(url, target, size_bytes=None)` — source `repository` exacto;
+    rechaza target relativo y repos por encima del cap de 500 MB.
+  - `apply_to_branch(tar_path, repo_url, branch, workdir, repo_dir=None)` —
+    clon fresco + branch nueva + overlay solo del árbol del proyecto.
+    Purga `.git`, `__pycache__`, `.pytest_cache`, `node_modules` del copy del
+    worker antes de overlay (el bug de E3: `git add` abortaba por permisos).
+    Extracción con `filter="data"` (el archivo no puede escribir fuera del
+    scratch).
+  - `run_tests(workdir, command)` — `(returncode, output)`; un test rojo es
+    un resultado, no una excepción.
+- **Tests:** 10 nuevos (3 de FilesClient, 7 de sync). Suite total: 29/29.
+- **Smoke real verificado (round trip completo por código de producto):**
+  tarea `subtract(a,b)` delegada → worker `completed` (70.165 tokens) →
+  `download_to` 60.928 bytes → `apply_to_branch` con diff `M main.py`,
+  `M tests/test_main.py` → `run_tests` rc 0 en el Mac.
+
+**Aceptación cumplida:** el ciclo E3 corre por código de producto.
 
 ## WU-4 — Task Planner + CLI + state (0.5.0)
 - `remote_worker/planner.py`:

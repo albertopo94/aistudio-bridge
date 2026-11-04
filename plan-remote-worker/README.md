@@ -47,12 +47,12 @@ como branch con diff verificable.
 
 - Investigación: completa (documento base: `investigacion-google-antigravity-engram-gentle-ai.md`).
 - PoC: 7/7 pasos PASS (Ruta A 1-5 + Fase 2 E1-E3). Evidencia en `poc/`.
-- Producto: **WU-0, WU-1 y WU-2 completos (v0.1.0 → v0.3.0)**. Existen
-  `remote_worker/google_client.py` (cliente de Interactions API),
-  `remote_worker/engram_adapter.py` (memoria local con proyecto fijado y
-  allowlist) y `remote_worker/function_loop.py` (bucle de callbacks acotado),
-  con 19 tests contra fake HTTP server y smoke real verificado. Sigue WU-3
-  (Workspace Sync: ida y vuelta del código).
+- Producto: **WU-0 a WU-3 completos (v0.1.0 → v0.4.0)**. Existen
+  `google_client.py` (interacciones + files API), `engram_adapter.py`
+  (memoria local con proyecto fijado y allowlist), `function_loop.py` (bucle
+  de callbacks acotado) y `sync.py` (ida y vuelta del código a una branch
+  local). 29 tests contra fake HTTP server y round trip real verificado
+  contra `worker-poc-toy`. Sigue WU-4 (Task Planner + CLI + state).
 - Repo público: <https://github.com/albertopo94/aistudio-bridge>
 
 ## Referencias de memoria (Engram, proyecto aistudio-bridge)
