@@ -243,7 +243,7 @@ Delta de límites vs README "Limits worth knowing" (candidatos a G6/G14):
 
 | # | Prioridad | Gap |
 |---|---|---|
-| G11 | low (feature) | Input multimodal (image base64) para tareas con capturas/diagramas. |
+| G11 | low (feature) | Input multimodal (image base64) para tareas con capturas/diagramas. Caso de uso canónico: "mira esta captura de pantalla con el error" — `run`/`ask` aceptan `--image <ruta>` (1 o varias), la leen en base64 y arman el array de partes (`text` + `image` con `mime_type`). |
 | G12 | media | Cancelación server-side: `cancel` hoy es local-only; llamar `POST /v1beta/interactions/{id}:cancel` para detener el loop en Google y no gastar quota. |
 | G13 | media (confiabilidad) | Background execution: hoy el cliente mantiene el HTTP abierto hasta 600s; la doc recomienda `background=True` + polling de `GET /v1beta/interactions/{id}` para tareas largas (evita dropouts de socket). |
 | G14 | doc | README "Limits"/"Models": baselines de costo (US$0.25–3.25; ~US$5 máximo), 50-70% input cacheado, los 2 modelos adicionales existentes (el piso sigue siendo decisión del usuario). |
