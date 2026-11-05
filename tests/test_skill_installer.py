@@ -38,6 +38,11 @@ class TestSkillInstaller(unittest.TestCase):
             content = open(path).read()
         self.assertIn(f"name: {SKILL_NAME}", content)
         self.assertIn("remote-worker", content)
+        # Rule 1b: the skill documents the real key resolution order
+        # (env wins, stored config is the fallback), not the PoC-only env var.
+        self.assertIn("GEMINI_API_KEY", content)
+        self.assertIn("~/.remote-worker/config.json", content)
+        self.assertNotIn("Run from the project where the API key is available", content)
 
     # Rule 2: reinstalling keeps a timestamped backup.
     def test_reinstall_backs_up_previous(self):

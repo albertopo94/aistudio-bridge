@@ -91,8 +91,9 @@ Two modes:
 - `remote-worker ask "<task>"` for NON-code tasks (research, analysis,
   generation): returns the worker's text directly.
 
-Run from the project where the API key is available (it is read from the
-`GEMINI_API_KEY` environment variable; never print it).
+The API key is resolved in order: the `GEMINI_API_KEY` environment
+variable wins, then the stored config in `~/.remote-worker/config.json`
+(written by `remote-worker setup`, 0600). Never print it.
 
 ## Rules
 
