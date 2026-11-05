@@ -7,3 +7,4 @@ poc/state.env
 poc/logs/
 poc/e3-work/
 remote-worker/
+aistudio_bridge.egg-info/
