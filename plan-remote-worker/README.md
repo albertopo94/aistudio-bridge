@@ -117,6 +117,31 @@ No aplican (no re-investigar): GCS source (sin GCS), inline source (marginal),
 Hooks (los guardrails ya viven en el lado local: purge + `filter="data"` +
 review humana del diff).
 
+## Cobertura doc `managed-agents-quickstart` (auditoría 2026-11-05)
+
+Fuente: <https://aistudio.google.com/docs/managed-agents-quickstart> (31k
+chars, lectura completa). Cotejo de sus 5 apartados contra el producto:
+
+| Apartado | Veredicto |
+|---|---|
+| `continue-conversation` | Cubierto: `continue_task` pasa ambos ejes (`previous_interaction_id` + `environment_id`). Las combinaciones mix-and-match restantes (nueva conversación en el mismo env / misma conversación en env nuevo) = G7, no necesarias hoy. |
+| `automatic-context-compaction` | Nuevo dato: la API comprime sola el contexto a ~135k tokens en conversaciones largas (evita context rot). Cero acción (automático de Google); línea de doc = G6. La compacción opera sobre el *contexto*; `max_total_tokens` opera sobre el *uso total*: son dos cosas distintas, anotar en README "Limits". |
+| `download-files` | Producto por delante de la doc: el quickstart sigue usando el endpoint legacy `/files/environment-{id}:download`; nosotros migramos al endpoint nuevo (`environments/{id}/files?alt=media&recursive=true`) en WU-3. |
+| `save-managed-agent` | NO aplica por diseño: congelaría `system_instruction` + `base_environment` (sources fijos) + modelo en un registro. El contrato de worker es dinámico, generado por tarea (repo, tarea, tests, presupuesto). Agravante del PoC: `agents.create` lockea el modelo, y el producto necesita switching Argon/3.8-flash por tarea. En el radar si algún día se quiere un "worker estándar" de contrato fijo. |
+| `invoke-managed-agent` | Consecuencia de 4. Dato: su ejemplo REST incluye el header `Api-Revision: 2026-05-20` (único de toda la doc); posible requisito del flujo de agents guardados. |
+
+Discrepancias doc-vs-realidad confirmadas (no corregir el producto, anotar):
+1. La doc dice "use `interaction.output_text`"; el PoC probó que el texto
+   real está en `steps`/`model_output` — el producto lo lee de ahí.
+2. Los ejemplos SDK de multi-turn sugieren timeout fijo de 5 min
+   (`timeout: 300_000`); el producto usa polling (`run_until_complete`),
+   correcto para tareas que superan ese bloque.
+
+| # | Prioridad | Gap |
+|---|---|---|
+| G6 | doc | README "Limits": línea de context compaction a ~135k tokens (automática, lado Google) + aclaración compaction vs `max_total_tokens`. |
+| G7 | baja | `--reuse-env`: mix-and-match de la doc (nueva conversación sobre el mismo sandbox) para no reinstalar dependencias en tareas encadenadas del mismo repo. |
+
 ### TODO — PoC del upload resumable (~1.5 GB), post-self-test
 
 Objetivo: medir el techo real de un upload directo al sandbox. Si 1.5 GB
