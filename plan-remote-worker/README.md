@@ -343,6 +343,42 @@ restricciones.
 
 Refinements: G1 sube en factibilidad (allowlist en create_interaction directo); G15 se amplía (también se pierde el puntero a AGENTS.md, ver G22); G20 gana una segunda instancia (el set de modelos del managed flow); G2 nota sobre saved agents externos.
 
+## Cobertura doc `deep-research` (auditoría 2026-11-05)
+
+Fuente: <https://aistudio.google.com/docs/deep-research> (99k chars, 4 slices;
+auditoría delegada a subagente, claims verificados inline). Qué cubre en una
+línea: el agente Deep Research — investigación larga en background
+(plan→buscar→leer→sintetizar) sobre la misma Interactions API, con planning
+colaborativo, visualizaciones y costo por tarea.
+
+| Subcapítulo | Veredicto |
+|---|---|
+| Intro / basic usage / versions (`deep-research-preview-04-2026`, `-max`) | No aplica directo: otro agente; complementa `ask`, no `run`. `background=true` es OBLIGATORIO aquí (no opcional como en Antigravity). |
+| Collaborative planning (plan/refine/aprobación) | Nuevo dato: `agent_config.collaborative_planning` de 3 fases; sin análogo nuestro. |
+| Visualization (`visualization: "auto"`) | Nuevo dato: deltas de imagen en streaming; nuestro `last_model_output` (`google_client.py:195-199`, verificado) concatena solo `text` — las imágenes se descartarían. |
+| Tools (+ mcp_server, file_search) | Parcial: google_search/url_context/code_execution = las de `ask`; `file_search`/MCP sin análogo nuestro. |
+| Multimodal input (image + **document/PDF**) | Refina G11: confirma el array `text`+`image`+`document` (`mime_type: application/pdf`) — G11 queda con forma de payload concreta y scope ampliado a PDF. |
+| Long-running (background obligatorio, poll) | Nuevo dato: `background=true` mandatory → un modo research exigiría G13 completo. |
+| Streaming (reconnect con `last_event_id`, eventos `thought`/`image`) | Nuevo dato: reconexión `GET ...?stream=true&last_event_id=`; nuestro SSE es one-shot (`google_client.py:135`), sin reconexión. |
+| Follow-up (agent→**model** mix: continuación con `model="gemini-4-argon"`) | Nuevo dato: patrón de continuación con modelo plano vía `previous_interaction_id`; confirma la nota de mezcla agent→model (G14/G15). |
+| Agent configuration (`type: "deep-research"`) | Nuevo dato: sin `max_total_tokens` documentado para este type → presupuesto/incomplete desconocido (G29). |
+| Availability/pricing (~US$1–3/task; Max ~US$3–7; **elegibilidad free-tier NO declarada**) | Nuevo dato: rompe la propiedad "$0 free tier" de la decisión #5 — alimentar G14/G27. |
+| Safety / best practices | Refinan: web-content-as-input (injection) y store-on refuerzan G17/G1. |
+| Limitations (no custom function tools; **store=True obligatorio con background**; 60-min max; sin structured output) | **El blocker clave**: sin custom function calling → las memory tools de Engram serían imposibles con Deep Research. |
+
+**¿Deep Research como backend de `ask`?** Encaja solo como modo `research` opcional futuro, **no** como reemplazo de `ask`: exigiría apagar la memoria local (sin function calling), storage-on forzoso (G17), polling de hasta 60 min (G13), costo US$1–7/tarea sin free-tier declarado, y el control de presupuesto es desconocido (G29). Los dos pilares del producto (memoria local + $0) se caen. Low priority.
+
+| # | Prioridad | Gap |
+|---|---|---|
+| G25 | low (feature) | Modo `research` opcional sobre `deep-research-preview-04-2026`: background polling + reconnect SSE + memoria OFF + agent_config type deep-research. Solo si algún día el usuario pide investigación pesada de verdad. |
+| G26 | low-doc (refina G17) | Con background, `store=True` es obligatorio — si G13/G25 aterrizan, la decisión de privacidad G17 se vuelve unavoidable. |
+| G27 | low-doc (refina G14) | Costos Deep Research ~US$1–3 (Max ~US$3–7)/tarea, free-tier no declarado: el claim "$0 free tier" del README debe quedar acotado a Antigravity. |
+| G28 | low (refina G11) | La forma de input multimodal confirmada: `text` + `image` + `document` (PDF con mime_type) — mismo builder sirve para ambos si G11 aterriza. |
+| G29 | low (open question) | ¿Honra deep-research `max_total_tokens`/`incomplete`? ¿Qué modelo lo corre? Undeclared en la doc; verificar antes de depender. |
+| G30 | low-doc (refina G12/G13) | Deep Research hace mandatory background y lo acota a 60 min: refuerza que `ask` salga del SSE one-shot a background+polling y que `cancel` use el endpoint server-side. |
+
+Refinement G21 (2ª instancia): la continuación de deep-research usa `model="gemini-4-argon"` plano — el patrón mix agent→model existe y nuestro `continue_task` no lo usa (queda para el TODO multi-agente/mixed-model).
+
 ### TODO — G9: mensaje amigable para `continue` contra sandbox expirado
 
 Hoy `continue` a los 7 días del TTL devuelve el 404 crudo de la API
