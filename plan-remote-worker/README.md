@@ -51,8 +51,50 @@ como branch con diff verificable.
   - Setup interactivo con API key guardada en `~/.remote-worker/config.json` (0600), sin `.env` ni exports obligatorios.
   - Comandos disponibles: `setup` (con `--install-skill`, `--list-skill-backups`, `--restore-skill`), `run`, `ask` (con `--stream`), `status`, `continue`, `cancel`.
   - 81 tests unitarios contra fake HTTP server.
-  - Siguiente sesión: probar la skill en una sesión fresca de gentle-shell y evaluar el TODO (streaming para `run`, `ask` con repo opcional, multi-agente, ADR 0001).
+  - Siguiente sesión: ver la sección **Próxima sesión — self-test** abajo.
 - Repo público: <https://github.com/albertopo94/aistudio-bridge>
+
+## Próxima sesión — self-test (el producto corrigiendo al producto)
+
+Meta: probar la delegación real (skill → CLI global → worker remoto) usando
+tareas de este propio repo, **antes que cualquier otro fix** pendiente
+(streaming para `run`, `ask` con repo, multi-agente, ADR 0001).
+
+Condición dura: el worker monta el repo **desde GitHub**, no del worktree
+local. Esta sección debe estar commiteada y pushed antes de delegar.
+
+### Los 3 fixes del primer turno
+
+| # | Fix | Aceptación |
+|---|---|---|
+| Q1 | Sección "Delegating from your agent" en `README.md`: cómo delegar desde un agente compatible (gentle-shell) usando la skill, con 1-2 prompts de ejemplo (código → `run`, no-código → `ask`). | El README documenta el flujo de delegación; los prompts nombran el trigger y el modo. |
+| Q2 | El ejemplo "First run" deja de apuntar al repo juguete `worker-poc-toy` (era solo del PoC) y apunta a este repo: `--repo https://github.com/albertopo94/aistudio-bridge`. El bloque `Output:` se etiqueta como *sample output* (el worker no puede ejecutar la CLI desde el sandbox; un run local real puede reemplazarlo después). | El README no referencia `worker-poc-toy`; el output está etiquetado como sample. |
+| Q3 | Alias `-v` de `--version` (hoy `remote-worker -v` falla con exit 2). `--version` y `-v` imprimen la versión y exit 0, fijados con test. | `remote-worker -v` → exit 0, imprime la versión. |
+
+Notas de ejecución:
+- Q2 es lo más barato y lo más demostrativo (self-delegation como ejemplo
+  canónico). El orden Q1→Q2→Q3 es el pedido por el usuario.
+- Q3 es seguro: el CLI no tiene modo `verbose`, así que `-v` no compite.
+- Cada fix lleva sus tests; el bump de versión lo decide el worker según
+  `AGENTS.md` §3 (se espera un solo bump para el work unit completo).
+
+### Prompt de delegación (para la sesión fresca de gentle-shell)
+
+> Delegate this to the remote worker: in the repo
+> https://github.com/albertopo94/aistudio-bridge, implement the three fixes
+> Q1, Q2 and Q3 documented under "Próxima sesión — self-test" in
+> `plan-remote-worker/README.md`, in that order, before any other change.
+> Read `AGENTS.md` first. The test suite
+> (`python3 -m unittest discover -s tests`) must pass in the sandbox.
+
+### Checklist de la prueba (qué valida el self-test)
+
+1. gentle-shell descubre la skill `remote-worker` sin mención explícita del usuario.
+2. `run` resuelve la key de `~/.remote-worker/config.json` sin `GEMINI_API_KEY` en el ambiente.
+3. El diff vuelve en branch `worker/...` con `__pycache__`/`.git` purgados.
+4. Los tests pasan al revisar la branch en el Mac.
+5. El reporte trae status + tokens de budget; si `incomplete`, el comando exacto de `continue`.
+6. El worker NO aplica ni mergea nada: el merge es decisión del usuario.
 
 ## Referencias de memoria (Engram, proyecto aistudio-bridge)
 
