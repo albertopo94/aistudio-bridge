@@ -96,6 +96,26 @@ Notas de ejecución:
 5. El reporte trae status + tokens de budget; si `incomplete`, el comando exacto de `continue`.
 6. El worker NO aplica ni mergea nada: el merge es decisión del usuario.
 
+## Cobertura doc `agent-environment` (auditoría 2026-11-05)
+
+Fuente: <https://aistudio.google.com/docs/agent-environment> (112k chars, lectura
+completa). Veredicto: el flujo principal está cubierto (mount repository con
+cap 500MB en subdir, tar por el endpoint nuevo no `:download`, reuso de
+`environment_id`+`previous_interaction_id` en `continue`, state 0600,
+lifecycle 15min/7días, key fuera del sandbox). Vacíos:
+
+| # | Prioridad | Gap |
+|---|---|---|
+| G1 | media | `network` allowlist: hoy el sandbox tiene egress ilimitado (default). Choca con el espíritu de AGENTS.md §8. La doc da la solución exacta y desbloquea repos privados (PAT vía `transform: Authorization: Basic` o credential almacenada, sin que el secreto entre al sandbox). |
+| G2 | baja | Nadie borra environments: `cancel` es local-only, los sandboxes viven 7d por TTL. Falta `Environments API` (list/get/delete) en el cliente + algún comando `clean`. |
+| G3 | doc | README "Limits": el agente SOLO lee archivos de texto e imagen (binarios no soportados) y startup ~5s. Si un repo tiene binarios, el worker no puede leerlos. |
+| G4 | feature (ya en TODO) | Repos locales >500MB: protocolo de upload resumable ahora documentado (`PUT /upload/...?uploadType=resumable`, chunks con `Content-Range`, `308` para reanudar, `extract=true` para tar.gz). Pasa de "investigar" a "implementar". |
+
+No aplican (no re-investigar): GCS source (sin GCS), inline source (marginal),
+`env`/credentials en sandbox (contrario al diseño: nada de secretos adentro),
+Hooks (los guardrails ya viven en el lado local: purge + `filter="data"` +
+review humana del diff).
+
 ## Referencias de memoria (Engram, proyecto aistudio-bridge)
 
 - #2072 — evidencias PoC + Argon
