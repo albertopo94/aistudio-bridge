@@ -63,6 +63,15 @@ tareas de este propio repo, **antes que cualquier otro fix** pendiente
 Condición dura: el worker monta el repo **desde GitHub**, no del worktree
 local. Esta sección debe estar commiteada y pushed antes de delegar.
 
+Orden acordado para la próxima sesión (2026-11-05):
+1. Smoke real del fix G15/G22 (v0.9.3): verificar en vivo que un turno de
+   continuación y un `continue` llevan el contrato (system_instruction+tools).
+2. Self-test Q1-Q3 (abajo).
+3. G12+G13 (cancel server-side + background+polling) — los dos medias que
+   más tocan el uso diario.
+4. G9 (404 amigable).
+5. G1/G2/G17/G18 → el resto por el índice consolidado G1-G30.
+
 ### Los 3 fixes del primer turno
 
 | # | Fix | Aceptación |
