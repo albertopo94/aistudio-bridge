@@ -102,7 +102,7 @@ Detalle completo por fuente en las secciones "Cobertura doc" de abajo.
 
 | Prioridad | Gaps |
 |---|---|
-| **media-alta / bug** | **G15** continuationes pierden system_instruction+tools (→ worker sin contrato ni memoria; con G22 también se pierde el puntero a AGENTS.md) |
+| **media-alta / bug** | **G15** continuationes pierden system_instruction+tools (→ worker sin contrato ni memoria; con G22 también se pierde el puntero a AGENTS.md). **FIX v0.9.3** (commit 6fad9db): reenvío en run/ask/continue + record con kind/repo_dir. Pendiente: G22 parte b (source inline .agents/AGENTS.md) y smoke real con API. |
 | media | G1 network allowlist (factible directo en create_interaction; desbloquea G10), G10 hooks de repos de terceros (regla: solo repos confiables), G12 cancel server-side, G13 background+polling, G16 dos TTLs (1d interacción vs 7d env), G17 store/privacidad, G18 sin interactions.get, G22 AGENTS.md fuera de auto-load, G5 PoC 1.5GB, G9 404 amigable |
 | low / doc | G2 cleanup, G3 límites agente, G4 upload resumable (protocolo), G6 compaction/caching, G7 --reuse-env, G8 stack sandbox, G11/G28 multimodal (--image/PDF, builder único), G14/G27 costos README ($0 solo Antigravity), G19 429, G20 pin preview, G21 set modelos managed sin Argon, G23 skills inline, G24 run sin google_search, G25 modo research, G26 store forzado, G29 preguntas deep-research, G30 background para research |
 
@@ -309,7 +309,7 @@ soporta.
 
 | # | Prioridad | Gap |
 |---|---|---|
-| G15 | media-alta (bug) | `function_loop.py` y `continue_task` deben reenviar `system_instruction` (contrato de worker) y `tools` (memory) en cada turno de continuación; hoy el worker los pierde. Verificado contra el código 2026-11-05. |
+| G15 | media-alta (bug) — **FIX v0.9.3** | `function_loop.py` y `continue_task` deben reenviar `system_instruction` (contrato de worker) y `tools` (memory) en cada turno de continuación; hoy el worker los pierde. Verificado contra el código 2026-11-05. **Resuelto en v0.9.3**: kwargs en run_until_complete + continue reconstruye el contrato desde el record (kind/repo_dir) + tests on-the-wire (test_contract_resend). |
 | G16 | media | Dos TTLs: interacción 1 día (free) vs environment 7 días; README y mensajes de error deben nombrar cuál expiró (refina G9). |
 | G17 | media (privacidad/doc) | Sin control de `store` y README "Security" no declara que el contenido de la tarea queda server-side (1 día free / 55 paid) y navegable en AI Studio logs. |
 | G18 | media | Sin `interactions.get` y manejo terminal grueso: `queued`/`in_progress`/`failed` → exit 3 con el resultado del sandbox inalcanzable; `continue` solo acepta `incomplete`. |
@@ -347,11 +347,11 @@ restricciones.
 | # | Prioridad | Gap |
 |---|---|---|
 | G21 | low-med (doc/verificar) | El set de modelos de `agent_config` documentado para managed agents excluye Argon; verificar que el set inline no se achique, o documentar el riesgo en README. |
-| G22 | media | AGENTS.md del repo no está en el auto-load (solo `.agents/`/env root); su lectura depende del contrato, que G15 pierde en continuaciones. Mitigación: source inline a `.agents/AGENTS.md`. |
+| G22 | media (parcial en v0.9.3) | AGENTS.md del repo no está en el auto-load (solo `.agents/`/env root); su lectura depende del contrato, que G15 pierde en continuaciones. **Parte principal resuelta en v0.9.3**: el contrato (con el puntero a AGENTS.md) ahora se reenvía en cada continuación. Queda la redundancia: source inline a `.agents/AGENTS.md` para el auto-load nativo. |
 | G23 | low (feature/doc) | Canal oficial de skills inline no implementado; corregir la decisión #6 del plan o implementarlo. |
 | G24 | low (doc) | README "run vs ask": `run` NO tiene `google_search`/`url_context` (solo code_execution+memory); `ask` sí. Consecuencia práctica de `tools` reemplazando el default. |
 
-Refinements: G1 sube en factibilidad (allowlist en create_interaction directo); G15 se amplía (también se pierde el puntero a AGENTS.md, ver G22); G20 gana una segunda instancia (el set de modelos del managed flow); G2 nota sobre saved agents externos.
+Refinements: G1 sube en factibilidad (allowlist en create_interaction directo); G15 se amplía (también se pierde el puntero a AGENTS.md, ver G22 — la parte de reenvío quedó resuelta en v0.9.3); G20 gana una segunda instancia (el set de modelos del managed flow); G2 nota sobre saved agents externos.
 
 ## Cobertura doc `deep-research` (auditoría 2026-11-05)
 
