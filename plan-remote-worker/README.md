@@ -198,6 +198,29 @@ Resultados esperados:
 Costo: ~15 min, compute no facturado en preview, usa la API key existente.
 Orden: después del self-test (primer turno de la siguiente sesión).
 
+### TODO — G9: mensaje amigable para `continue` contra sandbox expirado
+
+Hoy `continue` a los 7 días del TTL devuelve el 404 crudo de la API
+(`Interactions API error 404: <body>`); el usuario no sabe que el sandbox
+murió por diseño ni que la tarea es irrecuperable.
+
+Diseño:
+
+1. Reproducir primero (5 min, no inventar el 404): crear un environment,
+   `DELETE`arlo, y llamar `create_interaction` con ese `environment_id`
+   muerto. Registrar el body exacto que devuelve la API.
+2. En `continue_task` (y el path de `ask` con env), capturar
+   `InteractionsError` con `status == 404` y devolver:
+   "the sandbox expired (7-day TTL); this task cannot be resumed —
+   start a new run with the same repo".
+3. Marcar la tarea `expired` en state para que `status` no la muestre
+   como reanudable.
+4. Test contra el fake HTTP server (404 → mensaje amigable + tarea
+   marcada `expired`).
+
+Orden: segundo turno de la siguiente sesión, después del self-test.
+Independiente de G5 (su reproducción hace su propio `DELETE`).
+
 ## Referencias de memoria (Engram, proyecto aistudio-bridge)
 
 - #2072 — evidencias PoC + Argon
