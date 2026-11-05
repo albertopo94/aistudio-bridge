@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.9.3] — 2026-11-05
+
+### Fixed
+
+- Every continuation now re-sends the worker contract and the tool set
+  (G15/G22). The Interactions API scopes `system_instruction` and
+  `tools` to one interaction, so previously each memory round-trip and
+  every `continue` resumed the task without the anti-push contract,
+  without the read-AGENTS.md rule and without the memory tools.
+  `run` records `kind` and `repo_dir` so `continue` rebuilds the exact
+  contract; legacy records without `repo_dir` still continue.
+
 ## [0.9.2] — 2026-11-05
 
 ### Changed
