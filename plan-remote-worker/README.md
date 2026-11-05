@@ -211,6 +211,43 @@ Refinamiento de G1: esta fuente le da un argumento más fuerte — el allowlist
 no es solo "el agente podría curlear", es la mitigación exacta del vector de
 hooks maliciosos de repos de terceros (G10).
 
+## Cobertura doc `antigravity-agent` (auditoría 2026-11-05)
+
+Fuente: <https://aistudio.google.com/docs/antigravity-agent> (auditoría
+delegada a subagente gentle-ai-explore; claims de código verificados en el
+padre). Qué cubre en una línea: la guía oficial del agente — herramientas,
+inputs, function calling, modelos, presupuesto, background/cancel, costos.
+
+| Subcapítulo | Veredicto |
+|---|---|
+| Preamble (nombre del agente, llamadas básicas) | Cubierto (`runner.py` AGENT, `google_client.py` POST /v1beta/interactions). La doc sigue mostrando `output_text`; el producto lee `steps`/`model_output` (hallazgo PoC). |
+| Supported tools (code_execution, google_search, url_context, environment, function, mcp_server) | Cubierto: el producto usa las por defecto; `function` = memory tools locales. |
+| Multimodal input (text + image base64 solo; audio/video/doc no) | G11 (low, feature): input de imágenes no soportado hoy (solo texto). |
+| Function calling (requires_action, pending calls, resumption stateful) | Cubierto: `function_loop.py` implementa el algoritmo de resolución exacto. |
+| MCP servers | No aplica: la memoria es local-first (custom `function`), sin MCP remoto. |
+| Model selection (4 modelos documentados) | Nuevo dato: la doc documenta también `gemini-3.6-flash` y `gemini-3.5-flash-lite`. El piso del producto (solo Argon + 3.8-flash) se mantiene por decisión del usuario, no por disponibilidad. |
+| Background execution + cancellation endpoint | G12 (med): `cancel` hoy es SOLO local (`runner.py` cancel: "the Google interaction may still finish"). La doc da `POST /v1beta/interactions/{id}:cancel` — cancelación server-side que detiene el loop y ahorra quota free-tier. |
+| Budget controls (max_total_tokens, status incomplete) | Cubierto (`planner.py` + manejo de `incomplete`). |
+| Estimated costs (US$0.25–3.25 típicos; hasta ~US$5; 50-70% input cacheado) | Nuevo dato para README: baselines de costo por tarea. |
+| Limitations (gen params 400, sin structured output, sin filesystem tool, audio/video/doc) | Ver "Delta de límites" abajo. |
+| Triggers (cron, pausas, executions API) | No aplica: CLI local on-demand. |
+
+Delta de límites vs README "Limits worth knowing" (candidatos a G6/G14):
+1. `temperature`/`top_p`/`top_k`/`stop_sequences`/`max_output_tokens` → 400
+   inmediato (el producto los omite, es un invariante a anotar).
+2. Sin structured output (el agente no puede forzar schemas JSON).
+3. `max_total_tokens` es **best-effort**: se evalúa entre pasos y puede
+   exceder levemente el presupuesto antes de `incomplete`.
+4. Tokens cacheados NO consumen `max_total_tokens`.
+5. Cancelación server-side existe (G12).
+
+| # | Prioridad | Gap |
+|---|---|---|
+| G11 | low (feature) | Input multimodal (image base64) para tareas con capturas/diagramas. |
+| G12 | media | Cancelación server-side: `cancel` hoy es local-only; llamar `POST /v1beta/interactions/{id}:cancel` para detener el loop en Google y no gastar quota. |
+| G13 | media (confiabilidad) | Background execution: hoy el cliente mantiene el HTTP abierto hasta 600s; la doc recomienda `background=True` + polling de `GET /v1beta/interactions/{id}` para tareas largas (evita dropouts de socket). |
+| G14 | doc | README "Limits"/"Models": baselines de costo (US$0.25–3.25; ~US$5 máximo), 50-70% input cacheado, los 2 modelos adicionales existentes (el piso sigue siendo decisión del usuario). |
+
 ### TODO — PoC del upload resumable (~1.5 GB), post-self-test
 
 Objetivo: medir el techo real de un upload directo al sandbox. Si 1.5 GB
