@@ -5,7 +5,16 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
-## [0.9.0] — 2026-11-04
+## [0.9.1] — 2026-11-05
+
+### Fixed
+
+- The `remote-worker` skill no longer tells agents to rely on the
+  `GEMINI_API_KEY` environment variable (PoC era). It documents the real
+  resolution order from 0.9.0: the environment variable wins, then the
+  private stored config in `~/.remote-worker/config.json` written by
+  `setup`. Pinned with a test assertion on the installed SKILL.md.
+
 
 ### Added
 
