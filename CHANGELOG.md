@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.9.2] — 2026-11-05
+
+### Changed
+
+- `.gitignore` now covers the setuptools `aistudio_bridge.egg-info/`
+  directory left behind by the editable install used for the global
+  `remote-worker` CLI deploy.
+
 ## [0.9.1] — 2026-11-05
 
 ### Fixed
