@@ -110,11 +110,39 @@ lifecycle 15min/7días, key fuera del sandbox). Vacíos:
 | G2 | baja | Nadie borra environments: `cancel` es local-only, los sandboxes viven 7d por TTL. Falta `Environments API` (list/get/delete) en el cliente + algún comando `clean`. |
 | G3 | doc | README "Limits": el agente SOLO lee archivos de texto e imagen (binarios no soportados) y startup ~5s. Si un repo tiene binarios, el worker no puede leerlos. |
 | G4 | feature (ya en TODO) | Repos locales >500MB: protocolo de upload resumable ahora documentado (`PUT /upload/...?uploadType=resumable`, chunks con `Content-Range`, `308` para reanudar, `extract=true` para tar.gz). Pasa de "investigar" a "implementar". |
+| G5 | PoC (~15 min, post-self-test) | Medir el techo real del upload directo al sandbox ("fair usage limits" no está cuantificado en la doc; el matiz de 1.5 GB decide si GCS hace falta como fallback). Diseño en la sección TODO abajo. |
 
 No aplican (no re-investigar): GCS source (sin GCS), inline source (marginal),
 `env`/credentials en sandbox (contrario al diseño: nada de secretos adentro),
 Hooks (los guardrails ya viven en el lado local: purge + `filter="data"` +
 review humana del diff).
+
+### TODO — PoC del upload resumable (~1.5 GB), post-self-test
+
+Objetivo: medir el techo real de un upload directo al sandbox. Si 1.5 GB
+pasa (entra y se queda), la vía GCS (2 GB documentados) es redundante para
+nuestro rango y no entra al producto. Si falla, queda registrado el punto
+de corte y GCS reentra como fallback documentado para arriba de ese.
+
+Diseño (script en `poc/`, mismo patrón que e1-e3):
+
+1. Crear un environment (interacción con `environment="remote"`).
+2. Un único archivo de ~1.5 GB (`dd if=/dev/urandom of=big.bin bs=1m count=1536`
+   — se prueba el techo de transporte/almacenamiento, no el contenido).
+3. Init del upload resumable (`uploadType=resumable`), chunks de 10 MB.
+4. Registrar: status final (200 o 4xx), punto de corte en bytes (si falla),
+   tiempo total.
+5. Borrar el environment (mide de paso el `DELETE` de G2).
+
+Resultados esperados:
+- (a) 200 OK → el upload directo cubre el rango que nos importa; README
+  documenta el cap de `repository` 500 MB + el escape hatch resumable.
+- (b) 4xx a cierto byte → ese es el techo efectivo de hoy; GCS queda como
+  fallback documentado (2 GB) y el README pone el número medido, no uno
+  inventado.
+
+Costo: ~15 min, compute no facturado en preview, usa la API key existente.
+Orden: después del self-test (primer turno de la siguiente sesión).
 
 ## Referencias de memoria (Engram, proyecto aistudio-bridge)
 
