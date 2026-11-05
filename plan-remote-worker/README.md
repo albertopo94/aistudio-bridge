@@ -142,6 +142,35 @@ Discrepancias doc-vs-realidad confirmadas (no corregir el producto, anotar):
 | G6 | doc | README "Limits": línea de context compaction a ~135k tokens (automática, lado Google) + aclaración compaction vs `max_total_tokens`. |
 | G7 | baja | `--reuse-env`: mix-and-match de la doc (nueva conversación sobre el mismo sandbox) para no reinstalar dependencias en tareas encadenadas del mismo repo. |
 
+## Cobertura doc `agent-environment` — pasada fina por subcapítulo (2026-11-05)
+
+Misma fuente que la auditoría anterior (`agent-environment`), esta vez
+subcapítulo por subcapítulo. Sin huecos de arquitectura; 2 gaps nuevos
+menores + refinamientos de G1/G4:
+
+| Subcapítulo | Veredicto |
+|---|---|
+| 3 formas de `environment` (`"remote"` / ID / config) | Cubiertas: `run` usa el objeto config, `ask` usa `"remote"`, `continue` usa el ID. |
+| "Configure an environment" (instalar, guardar env, reusar) | Parcial: el instalar ya lo hace el worker por tarea; el patrón de env pre-configurado reutilizable = G7 confirmado. |
+| "Mount from a source" (repository/gcs/inline, nunca `/`) | Cubierto: `mount_repo` apunta a `/workspace/<name>`; GCS/G4/G5 ya analizados; inline marginal. |
+| "Hooks" (`.agents/hooks.json`, guardrails en sandbox) | Matiz: el riesgo principal que mitiga (worker con credenciales que hace push) no existe en nuestro diseño — el worker nunca recibe credenciales. Pasa de "no aplica" a "endurecimiento opcional de bajo valor". |
+| "Private sources" (PAT vía transform, credential por ID) | Núcleo de G1, sin cambios. |
+| "Pre-installed software" | NUEVO G8: Ubuntu con curl/wget/git/jq/ripgrep/gcloud; Python 3.12 con numpy/pandas/requests/google-genai; Node 22 con typescript/create-vite. `pip`/`npm install` en runtime persiste solo si se reusa el env (G7). |
+| "Environment variables" (literal vs credential reference) | Correcto no usarlo. Dato valioso: con credential reference el sandbox recibe un placeholder y el proxy sustituye el secreto solo en salidas a dominios confiables — el worker podría llamar APIs externas sin ver el token. Bajo G1 como mecanismo conocido, fuera de scope hoy. |
+| "Network configuration" (allowlist, `disabled`) | Refinamiento de G1: (a) el wildcard `*.example.com` NO matchea el dominio raíz — agregarlo aparte; (b) `network: "disabled"` existe → futuro flag `--no-network` directo. |
+| "Credentials" (por ID, oauth2 auto-refresh, combo con transform) | Parte de G1. |
+| "Refresh credentials" (env_id + nuevo `network`; FS se preserva) | Solo relevante si G1 usa transform con tokens cortos. Nota bajo G1. |
+| "Environment lifecycle" | Cubierto (README Limits). |
+| "Environments API" (list/get/delete) | G2. |
+| "Manage files" (list/metadata/download/upload/resumable/409) | Cubierto (endpoint nuevo) + G4. Refinamiento: con `extract=true` el upload devuelve 409 si CUALQUIER archivo del tar ya existe en el target; G4 debe apuntar a target limpio o `overwrite=true`. |
+| "Pricing & resources" (4 cores, 16 GB fijos) | Se pliega en G8 (misma línea de README). |
+| "Limitations" | G3/G5. NUEVO G9: `environment_id` expirado/inválido devuelve 404; hoy `continue` a los 8 días devuelve error crudo de API. Falta: detectar el 404 y decir "sandbox expirado (7 días); la tarea no es reanudable". |
+
+| # | Prioridad | Gap |
+|---|---|---|
+| G8 | doc | README: stack del sandbox (Ubuntu, Python 3.12, Node 22, tools pre-instalados) + 4 cores/16 GB fijos + `pip`/`npm install` en runtime. |
+| G9 | bajo-medio | `continue` contra env expirado: 404 → mensaje amigable "sandbox expirado, no reanudable". |
+
 ### TODO — PoC del upload resumable (~1.5 GB), post-self-test
 
 Objetivo: medir el techo real de un upload directo al sandbox. Si 1.5 GB
