@@ -275,6 +275,39 @@ Resultados esperados:
 Costo: ~15 min, compute no facturado en preview, usa la API key existente.
 Orden: después del self-test (primer turno de la siguiente sesión).
 
+## Cobertura doc `interactions-overview` (auditoría 2026-11-05)
+
+Fuente: <https://aistudio.google.com/docs/interactions-overview> (auditoría
+delegada a subagente gentle-ai-explore; el claim G15 fue re-verificado en el
+padre contra `runner.py`/`function_loop.py`). Qué cubre en una línea: qué es
+la API de Interactions — recurso de turnos con steps, encadenado stateful,
+retención server-side, best practices, modelos soportados, y lo que aún no
+soporta.
+
+| Subcapítulo | Veredicto |
+|---|---|
+| Preamble (GA June 2026; `generateContent` legacy) | Cubierto: el producto ya usa `/v1beta/interactions`; sin deuda de migración. |
+| Why use the Interactions API (stateful chaining, steps observables, background) | Cubierto (`previous_interaction_id`, lectura de `steps`); `background` = G13; `store=false` = G17. |
+| How it works (steps cronología incl. function_call/result/model_output) | Cubierto: espeja `function_loop.py`. Nuevo dato: la respuesta de `create` trae solo steps generados por el modelo; `user_input` solo via `interactions.get` (el producto no llama `get` — limita G13). |
+| **Server-side state management** | **G15 (media-alta, BUG confirmado)**: `tools`/`system_instruction`/`generation_config` son interaction-scoped; "you must re-specify these parameters in each new interaction". Verificado: `run` envía contrato+tools, pero `function_loop.py` (turnos function_result) y `continue_task` NO los reenvían → desde el primer round-trip de memoria en adelante (y todo `continue`), el worker corre SIN el contrato anti-push/no-refactor y SIN las memory tools. |
+| **Data storage and retention** | **G16 (media)**: free tier retiene interacciones **1 día** (paid 55); `store=false` incompatible con `background` y con `previous_interaction_id`. README confunde los dos relojes (1 día de interacción vs 7 días de environment); `continue` muere en silencio al día 1. Refina G9 (el mensaje debe nombrar cuál reloj expiró). |
+| **View interactions in AI Studio** | **G17 (media, privacidad)**: con storage on (default; el producto nunca setea `store`), prompts, contexto del repo montado y resultados de memory tools quedan server-side, navegables en aistudio.google.com/logs. README "Security" calla. Falta: decisión registrada + vía `interactions.delete`. |
+| Best practices (implicit caching con previous_interaction_id; mezcla agent→model) | Valida el diseño stateful; una línea de costo para G14. Mezcla agent→model = idea, no gap. |
+| Supported models & agents | Cubierto: los 2 modelos del piso están en la tabla oficial; G20 por el pin de preview. |
+| SDKs | No aplica: stdlib-only por Project Profile. |
+| Limitations (sin MCP remoto aún; compatibilidad multi-turn; sin Batch/automatic function calling/explicit caching) | Cubierto/no aplica: sin MCP remoto (memoria local); `continue` nunca cambia de modelo; **la ausencia de automatic function calling confirma que `function_loop.py` es diseño obligatorio, no over-engineering**; sin explicit caching → caching implícito solo (refina G6). |
+
+| # | Prioridad | Gap |
+|---|---|---|
+| G15 | media-alta (bug) | `function_loop.py` y `continue_task` deben reenviar `system_instruction` (contrato de worker) y `tools` (memory) en cada turno de continuación; hoy el worker los pierde. Verificado contra el código 2026-11-05. |
+| G16 | media | Dos TTLs: interacción 1 día (free) vs environment 7 días; README y mensajes de error deben nombrar cuál expiró (refina G9). |
+| G17 | media (privacidad/doc) | Sin control de `store` y README "Security" no declara que el contenido de la tarea queda server-side (1 día free / 55 paid) y navegable en AI Studio logs. |
+| G18 | media | Sin `interactions.get` y manejo terminal grueso: `queued`/`in_progress`/`failed` → exit 3 con el resultado del sandbox inalcanzable; `continue` solo acepta `incomplete`. |
+| G19 | low | 429: mantener "sin retry automático" pero clasificar el 429 explícito (también en SSE, donde el status se aplasta a 0) con hint de esperar-y-reintentar; documentar por qué el retry ciego es inseguro con `previous_interaction_id` (no es idempotente: fork nuevo, re-facturado). |
+| G20 | low-doc | `antigravity-preview-09-2026` es un pin de preview sin política de deprecación documentada; una línea en README sobre qué pasa cuando la revisión cambia. |
+
+Refinements: G2 se amplía a `interactions.delete` (mismo comando, misma motivación de privacidad que G17); G13 `store=false` es incompatible con `background=true` → el background debe mantener el storage on, lo que amarra G13 a la decisión de G17; G14/G6 ganan la línea de caching implícito.
+
 ### TODO — G9: mensaje amigable para `continue` contra sandbox expirado
 
 Hoy `continue` a los 7 días del TTL devuelve el 404 crudo de la API
