@@ -171,6 +171,46 @@ menores + refinamientos de G1/G4:
 | G8 | doc | README: stack del sandbox (Ubuntu, Python 3.12, Node 22, tools pre-instalados) + 4 cores/16 GB fijos + `pip`/`npm install` en runtime. |
 | G9 | bajo-medio | `continue` contra env expirado: 404 → mensaje amigable "sandbox expirado, no reanudable". |
 
+## Cobertura doc `agent-hooks` (auditoría 2026-11-05)
+
+Fuente: <https://aistudio.google.com/docs/agent-hooks> (49k chars, lectura
+completa). Qué es, en una línea: **guardrails programables del sandbox** —
+scripts o HTTP requests que se disparan antes/después de cada herramienta del
+agente y pueden permitir, bloquear o actuar.
+
+Veredicto global: **no aplica por diseño, ahora con razones técnicas** (antes
+era descarte por juicio). Tres:
+
+1. **Fail-open**: si el hook crashea, expira (timeout 30s default) o devuelve
+   JSON no reconocido, el runtime trata todo como `allow` y la herramienta
+   corre igual. El propio doc lo dice: hooks son "policy guidance", no
+   enforcement. Nuestros guardrails viven local, donde no fallan abiertos:
+   purge de `.git`/`__pycache__`, `filter="data"`, allowlist Engram y review
+   humana del diff son enforcement real.
+2. **No intercepta custom function calling ni MCP**: nuestras memory tools
+   (resueltas localmente) están fuera de su alcance por construcción. El
+   vector sensible del diseño se controla local, donde ya lo hacemos.
+3. **Tamperable**: el propio agente (con write tools) puede modificar
+   `.agents/hooks.json` en la misma sesión.
+
+| Subcapítulo | Veredicto |
+|---|---|
+| Lifecycle events (solo `pre`/`post_tool_execution`) | Fail-open crítico: ver razón 1. `deny` educativo elegante pero nunca enforcement. |
+| Config discovery (`.agents/hooks.json` desde cualquier source) | **G10**: un repo montado de terceros puede inyectar hooks → código ejecutado en el sandbox en la primera tool call. |
+| Schema + matcher (regex RE2; `.*_file` no cubre `replace_file_content`/`list_dir`; globs de shell inválidos) | Gotchas de implementación si algún día se usa. Sin acción. |
+| Command hooks / HTTP hooks (loopback bloqueado; requiere `network.allowlist`) | HTTP hook corre desde dentro del sandbox → dependencia de G1. |
+| Failure semantics (crash/timeout/non-2xx → `allow`) | Confirmación textual de Google: hooks = guidance, no enforcement. |
+| Use cases (privacy recovery con deny + multi-turn; audit telemetry) | Patrones inteligentes, no aplicados: nuestro control es contrato + review humana; loopback bloqueado impide incluso telemetría local. |
+| Limitations (tool scope, config protection) | Razones 2 y 3 de arriba. |
+
+| # | Prioridad | Gap |
+|---|---|---|
+| G10 | media (condicionada) | Repos montados de terceros pueden traer su propio `.agents/hooks.json` → código ejecutado en el sandbox en la primera tool call; hoy, con egress ilimitado (G1), incluye exfiltración del repo montado (un command hook puede leer `/workspace` y POSTearla afuera). Con solo repos propios el riesgo es ~nulo. Regla a documentar en README Security: delegar solo contra repos propios o confiables. Cuando G1 aterrice, este vector muere solo: el request no sale aunque el hook corra. |
+
+Refinamiento de G1: esta fuente le da un argumento más fuerte — el allowlist
+no es solo "el agente podría curlear", es la mitigación exacta del vector de
+hooks maliciosos de repos de terceros (G10).
+
 ### TODO — PoC del upload resumable (~1.5 GB), post-self-test
 
 Objetivo: medir el techo real de un upload directo al sandbox. Si 1.5 GB
