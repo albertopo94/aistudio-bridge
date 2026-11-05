@@ -308,6 +308,41 @@ soporta.
 
 Refinements: G2 se amplía a `interactions.delete` (mismo comando, misma motivación de privacidad que G17); G13 `store=false` es incompatible con `background=true` → el background debe mantener el storage on, lo que amarra G13 a la decisión de G17; G14/G6 ganan la línea de caching implícito.
 
+## Cobertura doc `custom-agents` (auditoría 2026-11-05)
+
+Fuente: <https://aistudio.google.com/docs/custom-agents> (70k chars, 3 slices;
+auditoría delegada a subagente, claims verificados inline). Qué cubre en una
+línea: cómo construir un agente Antigravity — inline por interacción o
+ahorrado vía `agents.create/get/list/delete`, overrides por invocación y
+restricciones.
+
+| Subcapítulo | Veredicto |
+|---|---|
+| Intro inline vs saved | Cubierto: el producto es inline-only (`runner.py` envía todo por llamada). |
+| Customize the agent (agent_config + system_instruction + tools + environment.sources) | Cubierto: los 4 knobs en `runner.py:81-93`. Solo source `repository` → G23. |
+| Tools and system instructions | Cubierto + **G24**: la doc dice que `tools` **reemplaza** (no agrega) el set default (`code_execution`/`google_search`/`url_context`). Verificado: `run` envía solo code_execution+memory; `ask` envía los 3+memory. El README "run vs ask" no lo dice. |
+| AGENTS.md auto-load | **G22 (media)**: auto-load solo de `.agents/AGENTS.md` / `/.agents/AGENTS.md`; el repo monta en `/workspace/<name>` → el AGENTS.md del repo se lee SOLO porque el contrato lo ordena (`planner.py` worker_contract), no por auto-load. Con G15, ese puntero se pierde en cada turno de continuación. Mitigación documentada: source inline apuntando a `.agents/AGENTS.md`. |
+| Skills SKILL.md | **G23 (low)**: el canal inline oficial `.agents/skills/<n>/SKILL.md` nunca se implementó; el `skill_installer.py` escribe la skill LOCAL de gentle-shell, no la del sandbox. La decisión #6 del plan ("skills montables") está sobre-afirmada. |
+| Create a managed agent (saved) | No aplica por diseño: `agent_config` NO es overridable en named agents → mataría el switching Argon/3.8-flash, requisito central del producto. |
+| — From sources | No aplica + **G21**: la doc lista como modelos válidos SOLO 3.8-flash/3.6-flash/3.5-flash-lite (sin Argon); nuestro piso incluye Argon, probado inline (PoC). Si el set inline se achica al managed, `--model gemini-4-argon` se rompe. |
+| — From an existing environment (fork) | No aplica: `base_environment` acepta `environment_id` (el producto ya lo guarda) — "promover un sandbox caliente a perfil" queda en el radar, bloqueado por G21+model lock. |
+| — With network rules | **Refina G1 (sube su factibilidad)**: `network.allowlist`+`transform` funcionan en `create_interaction` directo, sin saved agent. Cuidado: las reglas nuevas REEMPLAZAN todas las anteriores. |
+| Invoke the agent | Cubierto; el "fork por invocación" solo aplica a saved agents. |
+| Overriding configuration at invocation | **Confirma G15**: los overrides son interaction-scoped → deben re-enviarse en cada continuación. |
+| Override network (refresh credentials) | Nuevo dato: refresco de `network` en interacciones sucesivas del mismo env; solo relevante si G1 usa transform. |
+| Manage agents (list/get/delete) | No aplica; nota: la CLI oficial de Google crea agents bajo el mismo proyecto (saved agents invisibles al producto) → nota bajo G2. |
+| Iteration workflow | No aplica (persistir = saved agents). Pasos 1-2 = nuestro flujo inline por tarea. |
+| Limitations | Nuevo dato: `base_agent` = antigravity-preview-09-2026 solo (refuerza G20); **sin anidado de subagentes** ("Subagent delegation is not yet supported") → el TODO multi-agente debe ser orquestador-side (interacciones secuenciales), nunca sandbox-side; sin versioning/rollback. |
+
+| # | Prioridad | Gap |
+|---|---|---|
+| G21 | low-med (doc/verificar) | El set de modelos de `agent_config` documentado para managed agents excluye Argon; verificar que el set inline no se achique, o documentar el riesgo en README. |
+| G22 | media | AGENTS.md del repo no está en el auto-load (solo `.agents/`/env root); su lectura depende del contrato, que G15 pierde en continuaciones. Mitigación: source inline a `.agents/AGENTS.md`. |
+| G23 | low (feature/doc) | Canal oficial de skills inline no implementado; corregir la decisión #6 del plan o implementarlo. |
+| G24 | low (doc) | README "run vs ask": `run` NO tiene `google_search`/`url_context` (solo code_execution+memory); `ask` sí. Consecuencia práctica de `tools` reemplazando el default. |
+
+Refinements: G1 sube en factibilidad (allowlist en create_interaction directo); G15 se amplía (también se pierde el puntero a AGENTS.md, ver G22); G20 gana una segunda instancia (el set de modelos del managed flow); G2 nota sobre saved agents externos.
+
 ### TODO — G9: mensaje amigable para `continue` contra sandbox expirado
 
 Hoy `continue` a los 7 días del TTL devuelve el 404 crudo de la API
