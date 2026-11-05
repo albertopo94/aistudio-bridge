@@ -44,13 +44,22 @@ def pending_calls(interaction: dict) -> list[dict]:
 
 def run_until_complete(client, dispatcher, interaction: dict, *,
                        max_steps: int = MAX_STEPS_DEFAULT,
-                       on_event=None) -> dict:
+                       on_event=None,
+                       system_instruction=None,
+                       tools=None) -> dict:
     """Answer local function calls until the interaction stops asking.
 
     Returns the final interaction (``completed``, ``incomplete`` or any
     other terminal status). Raises :class:`LoopLimitExceeded` when the agent
     asks for more than ``max_steps`` rounds, and :class:`NoPendingCallsError`
     when it asks for action without naming a call.
+
+    ``system_instruction`` and ``tools`` are the interaction-scoped
+    parameters the caller sent on the initial call (the worker contract and
+    the tool set). The API scopes them to one interaction, so every
+    continuation must re-send them or the resumed turn runs without the
+    contract and without the memory tools (G15). When omitted they are not
+    sent, preserving the previous behaviour for callers that pass neither.
     """
     steps_taken = 0
 
@@ -82,6 +91,8 @@ def run_until_complete(client, dispatcher, interaction: dict, *,
             input=results,
             environment=interaction.get("environment_id"),
             previous_interaction_id=interaction.get("id"),
+            system_instruction=system_instruction,
+            tools=tools,
         )
         steps_taken += 1
 

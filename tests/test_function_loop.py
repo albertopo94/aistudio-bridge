@@ -9,6 +9,10 @@ Rules under test:
    again (the API echoes past steps back).
 4. An endless ``requires_action`` is bounded by max_steps.
 5. ``requires_action`` with no pending call is an error, not a silent loop.
+6. The continuation re-sends the interaction-scoped ``system_instruction``
+   and ``tools`` when the caller provides them (G15): without them the
+   resumed turn loses the worker contract and the memory tools. When the
+   caller does not provide them, they are omitted.
 """
 
 import unittest
@@ -133,6 +137,35 @@ class TestRunUntilComplete(unittest.TestCase):
                 run_until_complete(
                     client, dispatcher, first, max_steps=2
                 )
+
+    # Rule 6: continuation carries the interaction-scoped parameters (G15).
+    def test_continuation_resends_scoped_params_when_given(self):
+        dispatcher = SpyDispatcher()
+        first = interaction("requires_action", [call_step("call_1")])
+        tools = [{"type": "code_execution"}, {"type": "function",
+                 "name": "memory_search"}]
+        with FakeInteractionsServer() as srv:
+            srv.reply_body = interaction("completed")
+            client = self._client(srv)
+            run_until_complete(
+                client, dispatcher, first,
+                system_instruction="WORKER CONTRACT",
+                tools=tools,
+            )
+            body = srv.last_body
+        self.assertEqual(body["system_instruction"], "WORKER CONTRACT")
+        self.assertEqual(body["tools"], tools)
+
+    def test_continuation_omits_scoped_params_when_not_given(self):
+        dispatcher = SpyDispatcher()
+        first = interaction("requires_action", [call_step("call_1")])
+        with FakeInteractionsServer() as srv:
+            srv.reply_body = interaction("completed")
+            client = self._client(srv)
+            run_until_complete(client, dispatcher, first)
+            body = srv.last_body
+        self.assertNotIn("system_instruction", body)
+        self.assertNotIn("tools", body)
 
     # Rule 5: requires_action with nothing to do is an error.
     def test_requires_action_without_pending_call_raises(self):

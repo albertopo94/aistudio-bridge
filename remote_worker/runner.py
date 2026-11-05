@@ -77,6 +77,10 @@ class TaskRunner:
         tools = [{"type": "code_execution"}]
         if self.memory_enabled:
             tools.extend(self.dispatcher.tool_specs())
+        contract = worker_contract(
+            project=self.project, repo_dir=repo_dir,
+            memory_tools=self.memory_enabled,
+        )
 
         interaction = self.client.create_interaction(
             agent=AGENT,
@@ -86,25 +90,25 @@ class TaskRunner:
                 "sources": [mount_repo(repo_url, repo_dir)],
             },
             agent_config=config,
-            system_instruction=worker_contract(
-                project=self.project, repo_dir=repo_dir,
-                memory_tools=self.memory_enabled,
-            ),
+            system_instruction=contract,
             tools=tools,
         )
         self.store.record({
             "task_id": task_id,
+            "kind": "run",
             "status": interaction.get("status"),
             "interaction_id": interaction.get("id"),
             "environment_id": interaction.get("environment_id"),
             "repo_url": repo_url,
+            "repo_dir": repo_dir,
             "branch": branch,
             "model": config["model"],
             "budget": config["max_total_tokens"],
             "task": task,
         })
 
-        final = run_until_complete(self.client, self.dispatcher, interaction)
+        final = run_until_complete(self.client, self.dispatcher, interaction,
+                                   system_instruction=contract, tools=tools)
         status = final.get("status")
         tokens = self.client.usage(final).get("total_tokens")
         self.store.record({
@@ -178,14 +182,40 @@ class TaskRunner:
                 "only an incomplete task can continue"
             )
         config = agent_config(model=record.get("model"), budget=budget)
+        # G15: system_instruction and tools are interaction-scoped, so this
+        # continuation must re-send them. Rebuild them from the task record:
+        # run tasks get the repo contract and the code tools, ask tasks get
+        # the research contract and the research tools. A record without
+        # repo_dir (created before this fix) falls back to the repo_url, and
+        # a record that has neither keeps the ask-style contract.
+        if record.get("kind") == "run" or (
+                record.get("kind") is None and record.get("repo_url")):
+            repo_dir = record.get("repo_dir")
+            if not repo_dir and record.get("repo_url"):
+                repo_dir = f"/workspace/{_repo_name(record['repo_url'])}"
+            repo_dir = repo_dir or "(no repository mounted)"
+            tools = [{"type": "code_execution"}]
+        else:
+            repo_dir = "(no repository mounted)"
+            tools = [{"type": "code_execution"}, {"type": "google_search"},
+                     {"type": "url_context"}]
+        if self.memory_enabled:
+            tools.extend(self.dispatcher.tool_specs())
+        contract = worker_contract(
+            project=self.project, repo_dir=repo_dir,
+            memory_tools=self.memory_enabled,
+        )
         interaction = self.client.create_interaction(
             agent=AGENT,
             input="continue",
             environment=record.get("environment_id"),
             previous_interaction_id=record.get("interaction_id"),
             agent_config=config,
+            system_instruction=contract,
+            tools=tools,
         )
-        final = run_until_complete(self.client, self.dispatcher, interaction)
+        final = run_until_complete(self.client, self.dispatcher, interaction,
+                                   system_instruction=contract, tools=tools)
         status = final.get("status")
         tokens = self.client.usage(final).get("total_tokens")
         self.store.record({
@@ -237,6 +267,10 @@ class TaskRunner:
                  {"type": "url_context"}]
         if self.memory_enabled:
             tools.extend(self.dispatcher.tool_specs())
+        contract = worker_contract(
+            project=proj, repo_dir="(no repository mounted)",
+            memory_tools=self.memory_enabled,
+        )
 
         if stream:
             interaction = self.client.stream_interaction(
@@ -244,10 +278,7 @@ class TaskRunner:
                 input=task,
                 environment="remote",
                 agent_config=config,
-                system_instruction=worker_contract(
-                    project=proj, repo_dir="(no repository mounted)",
-                    memory_tools=self.memory_enabled,
-                ),
+                system_instruction=contract,
                 tools=tools,
                 on_delta=lambda t: print(t, end="", flush=True),
             )
@@ -257,10 +288,7 @@ class TaskRunner:
                 input=task,
                 environment="remote",
                 agent_config=config,
-                system_instruction=worker_contract(
-                    project=proj, repo_dir="(no repository mounted)",
-                    memory_tools=self.memory_enabled,
-                ),
+                system_instruction=contract,
                 tools=tools,
             )
         self.store.record({
@@ -272,7 +300,8 @@ class TaskRunner:
             "task": task,
         })
 
-        final = run_until_complete(self.client, self.dispatcher, interaction)
+        final = run_until_complete(self.client, self.dispatcher, interaction,
+                                   system_instruction=contract, tools=tools)
         status = final.get("status")
         tokens = self.client.usage(final).get("total_tokens")
         text = self.client.last_model_output(final)
