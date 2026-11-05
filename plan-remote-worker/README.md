@@ -96,6 +96,16 @@ Notas de ejecución:
 5. El reporte trae status + tokens de budget; si `incomplete`, el comando exacto de `continue`.
 6. El worker NO aplica ni mergea nada: el merge es decisión del usuario.
 
+## Índice de gaps (G1–G30, consolidado tras 7 auditorías de doc)
+
+Detalle completo por fuente en las secciones "Cobertura doc" de abajo.
+
+| Prioridad | Gaps |
+|---|---|
+| **media-alta / bug** | **G15** continuationes pierden system_instruction+tools (→ worker sin contrato ni memoria; con G22 también se pierde el puntero a AGENTS.md) |
+| media | G1 network allowlist (factible directo en create_interaction; desbloquea G10), G10 hooks de repos de terceros (regla: solo repos confiables), G12 cancel server-side, G13 background+polling, G16 dos TTLs (1d interacción vs 7d env), G17 store/privacidad, G18 sin interactions.get, G22 AGENTS.md fuera de auto-load, G5 PoC 1.5GB, G9 404 amigable |
+| low / doc | G2 cleanup, G3 límites agente, G4 upload resumable (protocolo), G6 compaction/caching, G7 --reuse-env, G8 stack sandbox, G11/G28 multimodal (--image/PDF, builder único), G14/G27 costos README ($0 solo Antigravity), G19 429, G20 pin preview, G21 set modelos managed sin Argon, G23 skills inline, G24 run sin google_search, G25 modo research, G26 store forzado, G29 preguntas deep-research, G30 background para research |
+
 ## Cobertura doc `agent-environment` (auditoría 2026-11-05)
 
 Fuente: <https://aistudio.google.com/docs/agent-environment> (112k chars, lectura
