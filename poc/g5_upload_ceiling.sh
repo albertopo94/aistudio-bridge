@@ -46,7 +46,7 @@ trap cleanup EXIT
 # 2. make the blob and cut it into 10 MB slice files (one per chunk)
 echo "-- making $SIZE bytes (may take a moment)"
 dd if=/dev/urandom of="$BLOB" bs=1024 count=$((SIZE / 1024)) status=none
-SIZE=$(wc -c < "$BLOB")
+SIZE=$(wc -c < "$BLOB" | tr -d '[:space:]')
 rm -f "$WORK"/slice.*
 OFF=0
 while [ "$OFF" -lt "$SIZE" ]; do
