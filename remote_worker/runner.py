@@ -119,28 +119,35 @@ class TaskRunner:
         """
         os.makedirs(self.workdir, exist_ok=True)
         archive_path = os.path.join(self.workdir, f"{task_id}.tar.gz")
-        archive = archive_repo(local_repo, archive_path)
-        if archive["bytes"] > UPLOAD_LIMIT_BYTES:
-            size_gib = archive["bytes"] / (1024 ** 3)
-            limit_gib = UPLOAD_LIMIT_BYTES / (1024 ** 3)
-            raise ValueError(
-                f"this repository archives to {size_gib:.2f} GiB, above the "
-                f"{limit_gib:.2f} GiB ceiling a sandbox accepts for an upload "
-                "(measured with the G5 benchmark). Push it to a git host and "
-                "use --repo <url> instead, or shrink the working tree."
+        try:
+            archive = archive_repo(local_repo, archive_path)
+            if archive["bytes"] > UPLOAD_LIMIT_BYTES:
+                size_gib = archive["bytes"] / (1024 ** 3)
+                limit_gib = UPLOAD_LIMIT_BYTES / (1024 ** 3)
+                raise ValueError(
+                    f"this repository archives to {size_gib:.2f} GiB, above "
+                    f"the {limit_gib:.2f} GiB ceiling a sandbox accepts for "
+                    "an upload (measured with the G5 benchmark). Sharded "
+                    "upload is not implemented yet, so there is no route for "
+                    "it from this tool."
+                )
+            environment = self.environments.create_environment(
+                sources=sources, network=network,
             )
-        environment = self.environments.create_environment(
-            sources=sources, network=network,
-        )
-        environment_id = environment.get("id")
-        if not environment_id:
-            raise ValueError("the service did not return an environment id")
-        self.uploads.upload_file(
-            environment_id=environment_id,
-            path=f"workspace/{repo_name}/",
-            file_path=archive_path,
-            extract=True,
-        )
+            environment_id = environment.get("id")
+            if not environment_id:
+                raise ValueError("the service did not return an environment id")
+            self.uploads.upload_file(
+                environment_id=environment_id,
+                path=f"workspace/{repo_name}/",
+                file_path=archive_path,
+                extract=True,
+            )
+        finally:
+            # The archive is as big as the repository. Leaving it behind would
+            # quietly cost the user a second copy of their tree per task.
+            if os.path.exists(archive_path):
+                os.remove(archive_path)
         return {"id": environment_id, "archive_bytes": archive["bytes"],
                 "archive_files": archive["files"]}
 
@@ -294,6 +301,10 @@ class TaskRunner:
             workdir=os.path.join(self.workdir, "clone"),
             repo_dir=repo_name,
         )
+        # The workspace archive is the whole sandbox tree. Nothing after this
+        # reads it, so it goes now rather than accumulating one copy per task.
+        if os.path.exists(tar_path):
+            os.remove(tar_path)
         # The diff the user reviews must not contain artifacts that the test
         # run will add, so the tests run against a throwaway copy.
         tests_clone = self._prepare_tests_clone(applied["clone_dir"])
