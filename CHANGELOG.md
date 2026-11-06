@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.12.0] — 2026-11-06
+
+### Added
+
+- `run` and `ask` accept `--background`: the service runs the task and this
+  tool polls the stored interaction until it finishes, so a dropped connection
+  no longer loses a long task (G13). The watch is bounded (5 s apart, 360
+  reads by default); when it ends the task stays resumable and the report
+  names the command that picks it up. `--stream` and `--background` together
+  are a usage error on purpose.
+- `continue` now checks the interaction first and refuses to race one the
+  service still reports as running (chaining to it is a documented 400), and a
+  conversation past its retention is reported expired at the check instead of
+  at the continuation attempt.
+
+### Fixed
+
+- `continue` on a still-running task no longer prints "the agent reached its
+  token budget" — false, and it advertised the exact command the tool had
+  just refused. Incomplete results carry an explicit reason now.
+
 ## [0.11.0] — 2026-11-06
 
 ### Added

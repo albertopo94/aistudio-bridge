@@ -156,3 +156,13 @@ the whole backlog, work unit by work unit, on a feature branch.
   `GET /v1beta/interactions/{id}`, and an SSE stream can be resumed with
   `GET ...?stream=true&last_event_id=<id>`. Chaining to an `in_progress` interaction
   returns 400, which constrains how `continue` may meet a background task.
+
+- **L17** (evidence) T14 G13 delivered inline, v0.12.0, 13 new tests (129/129). Three
+  real findings inside the unit: (1) the fake server enqueued per-GET statuses but always
+  answered reply_status — every queued GET status was silently ignored until the full
+  suite caught it; (2) the CLI claimed "the agent reached its token budget" for a
+  still-running continue — a false statement that also printed the exact command the
+  tool had just refused, fixed with an explicit `reason` field instead of prose guessing;
+  (3) the pre-check read in `continue` turned the sandbox-404 path into "conversation
+  gone" one step earlier, pinned as its own test. Differential (correct harness): only
+  run -h / ask -h / status -h differ from main, all new flags.
