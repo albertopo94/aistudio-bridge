@@ -50,6 +50,21 @@ the whole backlog, work unit by work unit, on a feature branch.
   now", not an estimate. Acceptance: it uploads ~1 MiB to a scratch environment, deletes
   the environment on every exit path including failure, reports ok/blocked in one line, and
   is covered by tests against a fake server (no test touches the network).
+- **S13** The return path is a table too, with the same honesty as the upload one (L34).
+  Rows, each with its real status: (a) recursive tar of `workspace` applied to a fresh
+  local clone on a new branch — works, and today the only one the CLI reaches; (b) list the
+  workspace before fetching anything — **implemented in `FilesClient.list_files`,
+  unreachable from the CLI**; (c) fetch one file — **implemented in
+  `FilesClient.download_to`, unreachable from the CLI**; (d) push a branch to GitHub —
+  **rejected by design** (L33), documented with the reason rather than left silent.
+  Acceptance: the table is printable offline like `routes`; the CLI can list and fetch a
+  single file; tests cover both against a fake server; README and the skill embed the
+  rendered table; the GitHub rejection states why in the docs.
+
+- **S14** The download ceiling is **not measured** and must not be guessed (L35).
+  Acceptance: the return-path table says `not measured` in words, and the feature doc names
+  the test that would measure it and what it costs. Writing a number there is the same
+  failure class as the deleted 1.5 GiB constant.
 
 ## Tasks
 
@@ -80,6 +95,8 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T23 | S12 | inline, test-first: `probe` command | feat(probe) 25461f9 + v0.20.0 dfc60b4 |
 | T24 | S11 | **blocked** — live validation of sharded upload before it may be advertised; needs the user's quota OK | — |
 | T25 | S11 | **blocked** — live end-to-end `--local-repo` run + `--delete-env` decision; needs the user's quota OK | — |
+| T26 | S13,S14 | inline, test-first: the return path as a data table; expose `list`/fetch-one-file from the CLI (the client already has both); document the GitHub rejection and the unmeasured ceiling | — |
+| T27 | S14 | **blocked** — measure the download ceiling live; needs the user's quota OK, and the honest variant costs more than the cheap one (L35) | — |
 
 ## Log
 
@@ -409,3 +426,57 @@ clean/setup/status/continue/cancel -h` y `status nope` idénticas; difieren `-h`
 `routes` y `probe`), `--version`/`-v` (0.17.0 → 0.19.0, del bump ya commiteado) y
 `status` sin argumento, que lee el estado local del usuario — no una diferencia de
 código. Ninguna diferencia no pedida.
+
+**L33** (discovery + disposition, user question 2026-11-06) "en esa via tienes
+contemplado github? ... Pense que existia esa via. Me equivoque todo este tiempo?"
+**Verificado en código para responder: sí se equivocaba, y es bueno que lo haya
+preguntado.** La fuente `repository` (`--repo <url>`) no tiene soporte de
+credenciales en ninguna parte del producto (ni sync.py, ni planner.py, ni
+google_client.py envían token/PAT alguno): el sandbox clona solo URLs que puede
+alcanzar por sí mismo, o sea **públicas**. Los repos privados del usuario nunca
+pudieron ir por GitHub: siempre fueron por `--local-repo` (o por un espejo
+público). La vía "subir a GitHub para que Google lo baje" entonces **sí existe
+para repos públicos** (`--repo` es exactamente eso) y **no existe para privados**
+— que es probablemente lo que el usuario asumía. Como salida ("que Google pushee
+el resultado"): rechazado por diseño desde la fase 2 — requeriría entregar al
+sandbox una credencial con escritura sobre el GitHub del usuario; AGENTS.md §8
+define que el worker nunca recibe credenciales de escritura y que la verdad de
+git vive en la máquina del usuario. El flujo que vuelve el trabajo es: rama local
+nueva → el usuario revisa → él pushea con sus credenciales. El usuario expresó
+que esa parte "no suena nada mal". Queda como fila (d) de la tabla de bajada:
+rechazada a propósito y documentada con el porqué, no silenciosa (S13).
+
+**L34** (decision) La bajada merece la tabla igual que la subida (S13), pero la
+simetría con la subida es un falso amigo: la subida tiene 5 rutas porque depende
+de **dónde viven los archivos** (¿host git? ¿solo disco? ¿bucket?); la bajada
+tiene **un solo transporte** porque el sandbox es un filesystem sin memoria de
+cómo se llenó, y la única primitiva documentada es el endpoint de files (tar
+recursivo). El eje que sí faltaba poblar es la **granularidad**: hoy se baja el
+workspace completo en tar siempre (`runner.py:353` es el único call site de
+`FilesClient`), mientras `list_files` y `download_to` de-un-archivo están
+**implementados en el cliente y son inalcanzables desde la CLI** — el defecto de
+"implementado y enterrado". T26: tabla de bajada + exponer listar/bajar-uno en
+la CLI, test-first, y documentar el rechazo de GitHub push.
+
+**L35** (open technical question, en el tintero por pedido explícito del usuario)
+El **techo de bajada no está medido** y S14 prohíbe adivinarlo (es la misma clase
+de error que el 1.5 GiB borrado). Corrección que me puse a mí mismo en la
+conversación: medirlo honesto **no** es gratis ni "segundos" — hace falta un
+payload grande dentro del sandbox, y eso se consigue (a) subiendo un archivo
+grande → gasta la ventana de fair-use, o (b) haciendo que el agente genere
+archivos → gasta cuota de tarea y minutos. La variante barata (bajar el workspace
+de un sandbox con pocos MB) solo prueba lo chico. T27 bloqueado hasta OK del
+usuario; al correrlo hay que declarar qué número queda sin medir.
+
+**En el tintero, pregunta abierta del usuario (2026-11-06): ¿shards y GCS están
+diseñados y/o probados?** Estado exacto a hoy: **ninguna de las dos está
+implementada ni probada en vivo**. *Shards*: diseño existe (trozar el tar, subir
+N partes, recortar/rearmar en un turno de sandbox con `cat` + `tar -xzf`), cero
+código, cero pruebas; Google no la documenta; su valor real sería solo hacer
+reanudable una subida larga — **no** levanta la ventana de fair-use (medido,
+L29). Su fila en la tabla dice `not validated live` a propósito. *GCS*: solo
+documentada (2 GB, requiere GCP + bucket + gsutil del usuario), cero código, el
+usuario no declaró bucket. Ninguna se ofrece como alternativa en un mensaje de
+error. Decisión pendiente del usuario: validar shards en vivo (T24, gasta cuota)
+o dejarlos como fila informativa y, si algún día hace falta >1.5 GiB, ir directo
+a GCS cuando quiera meterle bucket.
