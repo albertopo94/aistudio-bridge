@@ -303,6 +303,146 @@ class InteractionsClient:
         return dict(interaction.get("usage", {}))
 
 
+class UploadResumeError(RuntimeError):
+    """A resumable upload could not find where to continue.
+
+    A 308 means "send the next chunk", but the Range header it must carry to
+    say where was missing or unparsable. Continuing blindly would corrupt the
+    upload, so this is an error the caller can report.
+    """
+
+
+class UploadClient:
+    """Resumable upload of one file into an environment (G4/G5).
+
+    Init, chunk, resume: the standard resumable protocol, driven by the
+    server's own Range header on each 308 so a mid-flight drop resumes exactly
+    where the server last committed, never from a guessed offset.
+    """
+
+    def __init__(self, api_key: str, base_url: str = DEFAULT_BASE_URL,
+                 timeout: float = 600.0, chunk_size: int = 10 * 1024 * 1024):
+        if not api_key:
+            raise ValueError("api_key is required")
+        self._api_key = api_key
+        self._base_url = base_url.rstrip("/")
+        self._timeout = timeout
+        self._chunk_size = chunk_size
+
+    def upload(self, *, environment_id: str, path: str, data: bytes) -> dict:
+        """Upload ``data`` into the environment at ``path``.
+
+        Returns the parsed final response (file metadata, or {} when the
+        service answers with an empty body as the docs show for the init).
+        """
+        if not environment_id:
+            raise ValueError("environment_id is required")
+        if not path:
+            raise ValueError("path is required")
+        session = self._init_session(environment_id, path, len(data))
+        self._put_chunks(session, data, len(data))
+        return self._final_read(session)
+
+    def _init_session(self, environment_id: str, path: str,
+                      total: int) -> str:
+        url = (f"{self._base_url}/upload/v1beta/environments/"
+               f"{urllib.parse.quote(environment_id, safe='')}/files/"
+               f"{_quote_path(path)}?uploadType=resumable")
+        request = urllib.request.Request(
+            url, data=b"", method="PUT",
+            headers={
+                "x-goog-api-key": self._api_key,
+                "X-Upload-Content-Type": "application/gzip",
+                "X-Upload-Content-Length": str(total),
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout) as resp:
+                location = resp.headers.get("Location")
+        except urllib.error.HTTPError as exc:
+            raise _upload_http_error(exc) from exc
+        except urllib.error.URLError as exc:
+            raise UploadError(0, f"network error: {exc.reason}") from exc
+        if not location:
+            raise UploadResumeError(
+                "the upload init did not return a Location header"
+            )
+        return location
+
+    def _put_chunks(self, session: str, data: bytes, total: int) -> None:
+        start = 0
+        end = min(self._chunk_size, total) - 1
+        while True:
+            chunk = data[start:end + 1]
+            headers = {
+                "Content-Type": "application/octet-stream",
+                "Content-Range": f"bytes {start}-{end}/{total}",
+            }
+            request = urllib.request.Request(
+                session, data=chunk, method="PUT", headers=headers,
+            )
+            try:
+                with urllib.request.urlopen(request,
+                                            timeout=self._timeout) as resp:
+                    if end == total - 1:
+                        self._final_body = resp.read()
+                        return
+                    # A 200/201 here on a non-final chunk would be unusual;
+                    # the docs say every non-final chunk answers 308.
+                    raise UploadResumeError(
+                        "a non-final chunk was accepted with status "
+                        f"{resp.status}, which the protocol says should be "
+                        "308 Resume Incomplete"
+                    )
+            except urllib.error.HTTPError as exc:
+                if exc.code == 308:
+                    last = self._parse_committed(exc.headers.get("Range", ""))
+                    if last is None:
+                        raise UploadResumeError(
+                            "the 308 carried no usable Range header; refusing "
+                            "to resume from a guessed offset"
+                        ) from exc
+                    start = last + 1
+                    end = min(start + self._chunk_size, total) - 1
+                    if start > end:
+                        raise UploadResumeError(
+                            f"server committed byte {last} but only {total} "
+                            "bytes were sent"
+                        )
+                    continue
+                raise _upload_http_error(exc) from exc
+            except urllib.error.URLError as exc:
+                raise UploadError(0, f"network error: {exc.reason}") from exc
+
+    def _parse_committed(self, range_header: str) -> int | None:
+        if not range_header.startswith("bytes="):
+            return None
+        try:
+            end = int(range_header[len("bytes="):].split("-")[1])
+        except (ValueError, IndexError):
+            return None
+        return end if end >= 0 else None
+
+    def _final_read(self, session: str) -> dict:
+        body = getattr(self, "_final_body", b"")
+        text = body.decode("utf-8").strip()
+        return json.loads(text) if text else {}
+
+
+class UploadError(RuntimeError):
+    """A resumable upload failed at the HTTP layer."""
+
+    def __init__(self, status: int, body: str):
+        self.status = status
+        self.body = body
+        super().__init__(f"upload failed (status {status}): {body}")
+
+
+def _upload_http_error(exc) -> UploadError:
+    raw = exc.read().decode("utf-8", errors="replace")
+    return UploadError(exc.code, raw)
+
+
 class EnvironmentsClient:
     """Client for the Environments API: list, read and delete environments.
 

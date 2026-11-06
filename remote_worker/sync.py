@@ -16,6 +16,7 @@ branch is the user's decision.
 from __future__ import annotations
 
 import base64
+import io
 import os
 import shutil
 import subprocess
@@ -30,6 +31,23 @@ REPOSITORY_SOURCE_LIMIT_BYTES = 500 * 1024 * 1024
 #: would reject into an explanation the user can act on.
 INLINE_FILE_LIMIT_BYTES = 1 * 1024 * 1024
 INLINE_TOTAL_LIMIT_BYTES = 2 * 1024 * 1024
+
+
+def tar_gz_bytes(files: dict) -> bytes:
+    """Pack ``{path: bytes}`` into a gzip tarball, in memory.
+
+    The upload path (G4/G5) pushes a repository that exceeds the 500 MB
+    repository-source cap. Building the archive in memory keeps the ceiling
+    explicit and the caller in charge of the total; nothing touches a temp
+    file this tool would then have to clean up.
+    """
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, content in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            tar.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
 
 
 def inline_source(local_path: str, target: str,
