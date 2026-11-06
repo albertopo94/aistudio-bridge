@@ -480,3 +480,11 @@ usuario no declaró bucket. Ninguna se ofrece como alternativa en un mensaje de
 error. Decisión pendiente del usuario: validar shards en vivo (T24, gasta cuota)
 o dejarlos como fila informativa y, si algún día hace falta >1.5 GiB, ir directo
 a GCS cuando quiera meterle bucket.
+
+**L36** (user disposition, 2026-11-06) El usuario cerró el tema del PR: la única
+pregunta era si Google puede subir el resultado a su GitHub, y la respuesta es no
+(ninguna credencial entra al sandbox, L33). Lo que su agente local hace después
+con `gh` (push, `gh pr create`) es comportamiento normal de su lado y **no se
+documenta, no se implementa, no se imprime como sugerencia desde el tool**: quedó
+explícitamente descartado, para que ninguna sesión futura lo re-proponga como
+feature. El flujo del tool termina en la rama local y ahí muere su alcance.
