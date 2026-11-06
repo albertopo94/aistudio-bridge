@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.19.0] — 2026-11-06
+
+### Added
+
+- `run --local-repo` reports the upload while it runs: bytes the service has
+  accepted, bytes total, the rate measured from this upload and the ETA that
+  rate implies, then a closing line with the total time. At the ~1.1-1.6 MiB/s
+  the service imposes, 500 MB is about six minutes and 1.5 GiB about sixteen,
+  and silence that long is indistinguishable from a hang. Progress goes to
+  stderr, so `> report.txt` still captures only the report, and bytes the
+  service has not acknowledged are never claimed as sent.
+
 ## [0.18.0] — 2026-11-06
 
 ### Added
