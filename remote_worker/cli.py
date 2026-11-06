@@ -61,6 +61,18 @@ def build_parser() -> argparse.ArgumentParser:
                           "host")
     run.add_argument("--no-network", action="store_true",
                      help="give the sandbox no outbound network at all")
+    run.add_argument("--reuse-env", default=None, metavar="ENVIRONMENT_ID",
+                     help="run inside an existing sandbox instead of a fresh "
+                          "one, keeping the dependencies an earlier task "
+                          "installed")
+    run.add_argument("--agents-file", default=None, metavar="PATH",
+                     help="send this local AGENTS.md to /.agents/AGENTS.md, "
+                          "which the service loads as system instructions")
+    run.add_argument("--mount-file", action="append", default=None,
+                     metavar="LOCAL:TARGET",
+                     help="place a local text file at TARGET inside the "
+                          "sandbox (repeatable), e.g. a skill at "
+                          "/.agents/skills/<name>/SKILL.md")
 
     status = sub.add_parser("status", help="show one task or all of them")
     status.add_argument("task_id", nargs="?")
@@ -162,12 +174,22 @@ def main(argv=None, *, runner=None) -> int:
                 print(f"note: '*.{missing}' does not match the root domain "
                       f"'{missing}'; add --allow-domain {missing} if you "
                       "need it", file=sys.stderr)
+            try:
+                mount_files = _split_mount_files(args.mount_file)
+            except ValueError as exc:
+                parser.error(str(exc))
+            if args.reuse_env is not None and not args.reuse_env.strip():
+                parser.error("--reuse-env needs an environment id "
+                             "('remote-worker clean' lists what you hold)")
             return _report_run(runner.run(
                 task=args.task, repo_url=args.repo, model=model,
                 budget=budget, branch=args.branch,
                 background=args.background,
                 allow_domains=args.allow_domain,
                 no_network=args.no_network,
+                reuse_env=args.reuse_env,
+                agents_file=args.agents_file,
+                mount_files=mount_files,
             ))
         if args.command == "clean":
             return _report_clean(runner.clean(apply=args.yes))
@@ -283,6 +305,24 @@ def _guess_project(args) -> str:
     the sandbox is usually a *different* checkout and rarely a match.
     """
     return os.path.basename(os.getcwd()) or "default"
+
+
+def _split_mount_files(values):
+    """Turn ``LOCAL:TARGET`` strings into (local, target) pairs.
+
+    Windows drive letters are not a concern here (the product targets macOS
+    and the target is always an absolute sandbox path), so the first colon
+    splits the pair and anything after it belongs to the target.
+    """
+    pairs = []
+    for value in values or []:
+        local, sep, target = (value or "").partition(":")
+        if not sep or not local.strip() or not target.strip():
+            raise ValueError(
+                f"--mount-file wants LOCAL:TARGET, got {value!r}"
+            )
+        pairs.append((local.strip(), target.strip()))
+    return pairs
 
 
 def _report_run(result: dict) -> int:

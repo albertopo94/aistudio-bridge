@@ -7,6 +7,7 @@ Kept thin on purpose: every decision lives in its own module.
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shutil
@@ -21,10 +22,12 @@ from .google_client import (EnvironmentsClient, FilesClient,
                             InteractionsTimeoutError)
 from .planner import agent_config, network_config, worker_contract
 from .state import DEFAULT_ROOT, TaskStore, _slug
-from .sync import apply_to_branch, mount_repo, run_tests
+from .sync import (apply_to_branch, inline_source, mount_repo, run_tests,
+                   INLINE_TOTAL_LIMIT_BYTES)
 
 AGENT = "antigravity-preview-09-2026"
 DEFAULT_TEST_COMMAND = ["python3", "tests/test_main.py"]
+AGENTS_TARGET = "/.agents/AGENTS.md"
 
 
 def _expired_report(record: dict) -> str:
@@ -100,10 +103,15 @@ class TaskRunner:
             budget: int | None = None,
             branch: str | None = None,
             background: bool = False,
-            allow_domains=None, no_network: bool = False) -> dict:
+            allow_domains=None, no_network: bool = False,
+            reuse_env: str | None = None,
+            agents_file: str | None = None,
+            mount_files=None) -> dict:
         config = agent_config(model=model, budget=budget)
         network = network_config(allow_domains=allow_domains,
                                  no_network=no_network)
+        if reuse_env is not None and not reuse_env.strip():
+            raise ValueError("--reuse-env needs an environment id")
         repo_name = _repo_name(repo_url)
         repo_dir = f"/workspace/{repo_name}"
         task_id = f"t_{int(time.time())}"
@@ -117,14 +125,21 @@ class TaskRunner:
             memory_tools=self.memory_enabled,
         )
 
-        environment = {
-            "type": "remote",
-            "sources": [mount_repo(repo_url, repo_dir)],
-        }
-        if network:
-            # The fence is declared once here; every later turn rejoins this
-            # environment by id, so it holds for the whole task.
-            environment["network"] = network
+        sources = [mount_repo(repo_url, repo_dir)]
+        sources.extend(self._inline_sources(agents_file=agents_file,
+                                            mount_files=mount_files))
+        if reuse_env:
+            # An existing sandbox is named by id: it already has its own
+            # sources and network rules, so only the mounts this task needs
+            # are added to it. Dependencies installed by an earlier task
+            # survive here, which is the point (G7).
+            environment = {"id": reuse_env, "sources": sources}
+        else:
+            environment = {"type": "remote", "sources": sources}
+            if network:
+                # The fence is declared once here; every later turn rejoins
+                # this environment by id, so it holds for the whole task.
+                environment["network"] = network
         interaction = self.client.create_interaction(
             agent=AGENT,
             input=task,
@@ -225,6 +240,25 @@ class TaskRunner:
             "tests_rc": tests_rc,
         })
         return result
+
+    def _inline_sources(self, *, agents_file: str | None,
+                        mount_files=None) -> list:
+        """Local files to place inside the sandbox, with the total ceiling kept.
+
+        ``agents_file`` is the shortcut for the file the service auto-loads;
+        ``mount_files`` are explicit ``local:target`` pairs already split by
+        the caller, for skills and anything else the task needs in place.
+        """
+        sources, used = [], 0
+        if agents_file:
+            source = inline_source(agents_file, AGENTS_TARGET)
+            used += len(base64.b64decode(source["content"]))
+            sources.append(source)
+        for local_path, target in mount_files or []:
+            source = inline_source(local_path, target, total_bytes=used)
+            used += len(base64.b64decode(source["content"]))
+            sources.append(source)
+        return sources
 
     def _prepare_tests_clone(self, clone_dir: str) -> str:
         """A fresh copy of the clone to run the tests in.

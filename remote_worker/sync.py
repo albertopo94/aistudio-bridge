@@ -15,6 +15,7 @@ branch is the user's decision.
 
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 import subprocess
@@ -23,6 +24,62 @@ import tempfile
 
 #: Documented cap for a ``repository`` source (docs/agent-environment).
 REPOSITORY_SOURCE_LIMIT_BYTES = 500 * 1024 * 1024
+
+#: Inline sources are capped at 1 MB per file and 2 MB in total by the
+#: environment documentation. Enforcing that here turns a request the service
+#: would reject into an explanation the user can act on.
+INLINE_FILE_LIMIT_BYTES = 1 * 1024 * 1024
+INLINE_TOTAL_LIMIT_BYTES = 2 * 1024 * 1024
+
+
+def inline_source(local_path: str, target: str,
+                  total_bytes: int = 0) -> dict:
+    """Build an ``inline`` source: one local file, placed inside the sandbox.
+
+    This is the channel for the two files the service reads by convention and
+    a mounted repository cannot reach: ``.agents/AGENTS.md``, which the service
+    auto-loads as system instructions, and
+    ``.agents/skills/<name>/SKILL.md``, which it auto-discovers as a skill. A
+    repository mounts at ``/workspace/<name>``, which is neither place, so a
+    project's AGENTS.md is otherwise read only because the worker contract
+    orders the agent to open it (G22), and the documented skill channel was
+    never used at all (G23).
+
+    Content is base64 and must be text: an inline source is something the
+    agent reads, not a blob it executes.
+    """
+    if not target or not target.startswith("/") or target == "/":
+        raise ValueError(
+            f"target must be an absolute path inside the sandbox, got "
+            f"{target!r}"
+        )
+    try:
+        with open(local_path, "rb") as fh:
+            raw = fh.read()
+    except OSError as exc:
+        raise ValueError(f"cannot read {local_path}: {exc.strerror}") from exc
+    if len(raw) > INLINE_FILE_LIMIT_BYTES:
+        raise ValueError(
+            f"inline sources are capped at 1 MB per file; {local_path} is "
+            f"{len(raw)} bytes"
+        )
+    if total_bytes + len(raw) > INLINE_TOTAL_LIMIT_BYTES:
+        raise ValueError(
+            "inline sources are capped at 2 MB in total; this file would push "
+            f"the total to {total_bytes + len(raw)} bytes"
+        )
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"inline sources must be text (utf-8); {local_path} is not"
+        ) from exc
+    return {
+        "type": "inline",
+        "content": base64.b64encode(raw).decode("ascii"),
+        "encoding": "base64",
+        "target": target,
+    }
 
 #: Entries inside a downloaded workspace that must never be overlaid.
 EXCLUDED_DIRS = frozenset({".git", "__pycache__", ".pytest_cache", "node_modules"})

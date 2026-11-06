@@ -125,6 +125,9 @@ merges the result itself — review the branch, then merge it with your own git.
 | `setup --restore-skill` | Restore the skill from its most recent backup (factory reset if it was the zero state) |
 | `run "<task>" --repo <url>` | Delegate one CODE task, bring the diff back |
 | `run "<task>" --repo <url> --background` | Same, but the service runs it and we poll — a dropped connection cannot lose the result |
+| `run "<task>" --repo <url> --reuse-env <id>` | Run in a sandbox you already have, keeping the dependencies an earlier task installed |
+| `run "<task>" --repo <url> --agents-file ./AGENTS.md` | Send your own AGENTS.md where the service reads it (`/.agents/AGENTS.md`) |
+| `run "<task>" --repo <url> --mount-file <local>:<target>` | Place a local text file inside the sandbox (repeatable) — skills, extra norms |
 | `ask "<task>"` | Delegate a NON-code task, get the text back (no repo mounted) |
 | `ask "<task>" --stream` | Same, but print the worker's text live as it is generated |
 | `ask "<task>" --background` | Same, but poll instead of holding one connection open (cannot combine with `--stream`) |
@@ -178,6 +181,34 @@ tier.
 
 Rule of thumb from the skill: if the worker must **edit code in a repo**, use
 `run`; if it only needs to **answer**, use `ask`.
+
+## What travels into the sandbox
+
+Three channels, and which one you use changes what the agent reads by default:
+
+| Channel | What the service does with it |
+|---|---|
+| `--repo` | Clones the repository at `/workspace/<name>` |
+| `--agents-file` | Written to `/.agents/AGENTS.md`, which the service **auto-loads as system instructions** |
+| `--mount-file local:target` | Written verbatim at `target`; `.agents/skills/<name>/SKILL.md` is auto-discovered as a skill |
+
+A repository's own `AGENTS.md` lands at `/workspace/<name>/AGENTS.md`, which is
+**not** an auto-load location: the worker reads it because the task contract
+orders it to, and it never reads a skill that lives only inside the repo. If
+you want either to be enforced rather than instructed, send it in:
+
+```bash
+remote-worker run "..." --repo <url> \
+  --agents-file ./AGENTS.md \
+  --mount-file ./.agents/skills/building/SKILL.md:/.agents/skills/building/SKILL.md
+```
+
+Inline files are capped by the service at 1 MB each and 2 MB in total, and must
+be text — the tool checks both before sending anything.
+
+`--reuse-env <environment_id>` runs the task in a sandbox you already have, so
+dependencies an earlier task installed are still there. `clean` prints the ids
+you hold. The task's repository is still mounted into it.
 
 ## Limits worth knowing
 
