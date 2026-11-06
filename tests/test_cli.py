@@ -4,11 +4,12 @@ The CLI is tested with an injected runner, so no network and no key are
 needed. Rules under test:
 
 1. ``--version`` prints the project version from VERSION.
-2. A model below the floor is a usage error (rc 2) naming the model.
-3. A task that hits its budget is not a failure: the CLI exits 0 and tells
+2. ``-v`` is an alias of ``--version`` (same output, exit 0).
+3. A model below the floor is a usage error (rc 2) naming the model.
+4. A task that hits its budget is not a failure: the CLI exits 0 and tells
    the user how to continue.
-4. A completed task reports status, tokens, branch and the changed files.
-5. An unknown task id exits non-zero with a message, never a traceback.
+5. A completed task reports status, tokens, branch and the changed files.
+6. An unknown task id exits non-zero with a message, never a traceback.
 """
 
 import io
@@ -65,6 +66,17 @@ class TestCli(unittest.TestCase):
         code, out, _ = invoke(["--version"], StubRunner())
         self.assertEqual(code, 0)
         self.assertRegex(out.strip(), r"^\d+\.\d+\.\d+$")
+
+    # Rule 2
+    def test_version_short_alias(self):
+        code, out, _ = invoke(["-v"], StubRunner())
+        self.assertEqual(code, 0)
+        self.assertRegex(out.strip(), r"^\d+\.\d+\.\d+$")
+
+    def test_version_alias_matches_long_form(self):
+        _, long_out, _ = invoke(["--version"], StubRunner())
+        _, short_out, _ = invoke(["-v"], StubRunner())
+        self.assertEqual(short_out.strip(), long_out.strip())
 
     # Rule 2
     def test_model_below_floor_is_usage_error(self):

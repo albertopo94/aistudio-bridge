@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
             "bring the result back to a local branch."
         ),
     )
-    parser.add_argument("--version", action="store_true",
+    parser.add_argument("--version", "-v", action="store_true",
                         help="print the version and exit")
     sub = parser.add_subparsers(dest="command")
 
@@ -89,7 +89,7 @@ def main(argv=None, *, runner=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
 
-    if "--version" in argv:
+    if "--version" in argv or "-v" in argv:
         print(read_version())
         return 0
 

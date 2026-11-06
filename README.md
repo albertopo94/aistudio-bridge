@@ -55,7 +55,7 @@ python3 -m pip install -e .
 remote-worker setup                    # asks for your Gemini API key once (hidden input)
 remote-worker run "Add a function divide(a, b) to main.py that raises
 ValueError on zero, with two tests. Run the test suite." \
-  --repo https://github.com/albertopo94/worker-poc-toy
+  --repo https://github.com/albertopo94/aistudio-bridge
 ```
 
 `setup` stores the key, the default model and the budget in a private file
@@ -63,16 +63,18 @@ ValueError on zero, with two tests. Run the test suite." \
 keeps the stored one. The environment variable `GEMINI_API_KEY` still wins
 if you prefer it, but nothing requires it.
 
-Output:
+*Sample output* — the exact branch name, token count and changed files depend
+on the task and the moment you run it. This block shows the shape of a
+completed run (here, against this very repository).
 
 ```
 task:   t_1793818082
 status: completed
 tokens: 107105 of 200000
-branch: worker/worker-poc-toy-1793818082
-clone:  ~/.remote-worker/worker-poc-toy/work/clone
-  M  main.py
-  M  tests/test_main.py
+branch: worker/aistudio-bridge-1793818082
+clone:  ~/.remote-worker/aistudio-bridge/work/clone
+  M  README.md
+  M  remote_worker/planner.py
 tests:  pass
 nothing was pushed; merge the branch when you are ready.
 ```
@@ -83,6 +85,34 @@ Then review and merge with your own git:
 cd ~/.remote-worker/<project>/work/clone
 git diff main
 ```
+
+## Delegating from your agent
+
+`remote-worker` is designed to be driven by an agent, not only by a person.
+From a compatible agent (one that loads skills, like gentle-shell) the
+`remote-worker` skill is discovered automatically and exposes the same CLI.
+The two prompts below name the trigger and the mode explicitly, so the
+skill knows what to run:
+
+**Code that edits a repository → `run`**
+
+> Use the remote worker. In the repo
+> `https://github.com/albertopo94/aistudio-bridge`, implement
+> `remote_worker/planner.py` to reject any model below `gemini-3.8-flash`
+> with a clear usage error, and add tests that pin the new rule. Read
+> `AGENTS.md` first; the suite (`python3 -m unittest discover -s tests`)
+> must pass. Bring the diff back on a branch and do not push it.
+
+**A task that only answers → `ask`**
+
+> Use the remote worker. Without mounting a repository, research the
+> official Antigravity interaction limit and answer: what is the maximum
+> total token budget per interaction, and is that a per-interaction or a
+> per-day figure? Cite the source. Use the free model.
+
+The skill turns the first prompt into `remote-worker run "..." --repo <url>`
+and the second into `remote-worker ask "..."`. The worker never applies or
+merges the result itself — review the branch, then merge it with your own git.
 
 ## Commands
 
