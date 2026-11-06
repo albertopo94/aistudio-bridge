@@ -16,10 +16,17 @@ Behaviour the PoC proved is required, pinned here for both clients:
 - Rate limits (429) and API errors (4xx) are reported to the caller with
   the exact response body; there is no automatic retry.
 - Timeouts surface as a clear error, never a hang.
+
+Diagnostics: with ``REMOTE_WORKER_TRACE`` set to a path, every request appends
+one JSON line there (method, URL, request body, secrets masked). The request
+itself is never modified or blocked by tracing, and a trace that cannot be
+written is silently skipped: it exists to leave evidence for a human to read,
+not to change what happens.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import urllib.error
@@ -27,6 +34,56 @@ import urllib.parse
 import urllib.request
 
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+
+#: Set to a file path to record every request the clients send.
+TRACE_ENV_VAR = "REMOTE_WORKER_TRACE"
+
+#: Substrings that mark a field as a credential once its name is normalised
+#: (lower-cased, non-alphanumerics removed). The API key itself never reaches a
+#: body -- it travels in a header the trace does not record -- but a worker
+#: result echoed back into ``input`` can carry one.
+_SECRET_HINTS = ("apikey", "token", "secret", "password", "credential",
+                 "authorization", "privatekey")
+
+
+def _is_secret_name(name: str) -> bool:
+    normalised = "".join(ch for ch in name.lower() if ch.isalnum())
+    return any(hint in normalised for hint in _SECRET_HINTS)
+
+
+def _mask(value):
+    """Deep-copy ``value`` with credential-shaped fields replaced."""
+    if isinstance(value, dict):
+        return {
+            key: ("[masked]" if _is_secret_name(str(key))
+                  else _mask(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_mask(item) for item in value]
+    return value
+
+
+def _trace_request(method: str, url: str, body) -> None:
+    """Append one JSON line to ``REMOTE_WORKER_TRACE`` when it is set.
+
+    Never raises: a broken, unwritable or missing trace path must not change
+    what the product does, and must not lose the real request.
+    """
+    path = os.environ.get(TRACE_ENV_VAR)
+    if not path:
+        return
+    try:
+        record = {"method": method, "url": url}
+        if isinstance(body, (dict, list)):
+            record["body"] = _mask(copy.deepcopy(body))
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 class InteractionsError(RuntimeError):
@@ -112,8 +169,10 @@ class InteractionsClient:
         if previous_interaction_id is not None:
             body["previous_interaction_id"] = previous_interaction_id
 
+        url = self._base_url + "/v1beta/interactions"
+        _trace_request("POST", url, body)
         raw = _send(
-            "POST", self._base_url + "/v1beta/interactions",
+            "POST", url,
             self._api_key, self._timeout, json.dumps(body).encode("utf-8"),
         )
         return json.loads(raw.decode("utf-8"))
@@ -141,8 +200,10 @@ class InteractionsClient:
             body["system_instruction"] = system_instruction
 
         data = json.dumps(body).encode("utf-8")
+        sse_url = self._base_url + "/v1beta/interactions?alt=sse"
+        _trace_request("POST", sse_url, body)
         request = urllib.request.Request(
-            self._base_url + "/v1beta/interactions?alt=sse",
+            sse_url,
             data=data, method="POST",
             headers={"Content-Type": "application/json",
                      "x-goog-api-key": self._api_key},

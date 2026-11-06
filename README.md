@@ -157,6 +157,8 @@ Rule of thumb from the skill: if the worker must **edit code in a repo**, use
   `.git` and build artifacts, and only then applied to your clone.
 - Memory is scoped by the orchestrator: a worker-supplied `project` argument
   is discarded, and admin operations (delete, prune, merge) are unreachable.
+- The request trace (`REMOTE_WORKER_TRACE`) is written only when you ask for
+  it, and masks credential-shaped fields before writing.
 - The worker may call `memory_search`, `memory_save` and `memory_context`.
   Nothing that writes to your filesystem beyond the repository, and nothing
   that deletes memory.
@@ -171,6 +173,22 @@ python3 -m unittest tests.test_cli        # one module
 The suite runs against a local fake of the Interactions API, so it needs no
 key and no network. Real-service smoke runs are recorded in
 `plan-remote-worker/03-plan-paso-a-paso.md` per work unit.
+
+### Recording what was actually sent
+
+Set `REMOTE_WORKER_TRACE` to a path and every request is appended to it as one
+JSON line (`method`, `url`, `body`). Use it to answer "did the worker contract
+really travel on that call?" with evidence instead of inference:
+
+```bash
+REMOTE_WORKER_TRACE=/tmp/rw-trace.jsonl remote-worker ask "..."
+grep -c system_instruction /tmp/rw-trace.jsonl   # one line per turn that sent it
+```
+
+A credential is never recorded: the API key lives in a header the trace does
+not read, and any `token`/`key`/`secret`-shaped field inside a body is written
+as `[masked]`. Tracing is opt-in, never rewrites the request, and a trace that
+cannot be written is skipped rather than failing the task.
 
 ## Documentation
 
