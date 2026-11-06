@@ -75,8 +75,8 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T18 | S2 | **closed by evidence** — G25 research returns HTTP 429 on the free tier (limit 0 input tokens/min), so it cannot run at all; G26/G29/G30 depend on it | docs(closing) |
 | T19 | closing | docs: mark every gap closed in the plan index; ADR 0001 reminder to the user | docs(closing) |
 | T20 | S8 | inline: G19 — recognise a 429 and explain the no-retry rule (SSE currently loses the HTTP status) | fix(rate-limit) |
-| T21 | S10,S11 | inline, test-first: route table as a data module + `routes` command + the fair-use 400 mapped to an actionable message; delete the fake 1.5 GiB guard | feat(routes) |
-| T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) |
+| T21 | S10,S11 | inline, test-first: route table as a data module + `routes` command + the fair-use 400 mapped to an actionable message; delete the fake 1.5 GiB guard | feat(routes) 98ec5cc + v0.18.0 d03b5ab |
+| T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) + v0.19.0 |
 | T23 | S12 | inline, test-first: `probe` command | feat(probe) |
 | T24 | S11 | **blocked** — live validation of sharded upload before it may be advertised; needs the user's quota OK | — |
 | T25 | S11 | **blocked** — live end-to-end `--local-repo` run + `--delete-env` decision; needs the user's quota OK | — |
@@ -346,3 +346,34 @@ discover -s tests`, 65s) sobre `a1dca98` — cierra el punto 5 de L27: el callba
   rutas). T24 (shards) sigue bloqueado: el usuario pidió confirmar después de la medición
   y la medición mostró que los shards **no** resuelven el límite de ventana, solo harían
   reanudable una subida larga.
+
+**L30** (evidence) T21 entregado inline, test-first, v0.18.0. RED observado por la
+razón correcta (`ImportError: cannot import name 'routes'`). Lo que landed:
+`remote_worker/routes.py` (tabla de 5 rutas con `ceiling`/`speed`/`needs`/`status`,
+`format_routes()`, `alternatives_line()`, `is_size_limit()`,
+`upload_failure_message()`), comando `routes` offline en la CLI (no pide key: se lee
+antes de gastar cuota), el 400 "File size exceeds maximum allowed limit" traducido a
+ventana de fair-use con acción (reintentar) y rutas alternativas, y el sandbox de un
+intento fallido se borra antes de levantar el error (si el delete falla, el mensaje lo
+dice y nombra `clean --yes`). Se **borró** `sync.UPLOAD_LIMIT_BYTES` y su guard: el
+número de 1530 MiB era verdadero el día medido y falso esa misma tarde (300 MiB
+rechazado a los 290, 20 MiB aceptado minutos después); el test que lo imponía se borró
+a propósito y `test_the_fake_local_ceiling_is_gone` fija que nadie lo reintroduzca.
+Una sola fuente de verdad: la tabla renderizada vive en `routes.py`, la imprime la CLI,
+el SKILL la embebe y el README también — `test_the_readme_embeds_the_rendered_table` y
+`test_the_skill_embeds_the_rendered_table` rompen si alguna copia se corre.
+12 reglas nuevas en `tests/test_routes.py`; suite **198/198**. Chequeo diferencial
+contra `1b459da` en 9 invocaciones (`--version`, `-v`, `-h`, `run/ask/clean/setup/
+status/continue/cancel -h`): idénticas salvo `-h`, que agrega el subcomando nuevo — lo
+pedido, nada no pedido. `routes` sale con `rc=0` y sin red.
+
+**L31** (evidence) T22 entregado inline, test-first. RED: 3 failures por ausencia de
+líneas de progreso en stderr. Lo que landed: `_upload_progress()` en `runner.py`
+devuelve el callback que consume el `on_progress` que ya existía en `UploadClient`
+(commiteado en `a1dca98`, sin consumidor hasta ahora), más `_human_rate` /
+`_human_duration`. Formato: `upload <sent>/<total> bytes at <rate> eta <t>` y línea
+final `... done in <t>`. Tres decisiones con test cada una: el progreso va a **stderr**
+(stdout sigue siendo el reporte, así `> report.txt` sigue sirviendo); la tasa se mide
+de la subida actual, no de un promedio recordado; y nada se informa como enviado que
+el servicio no haya acknowledgear (test con ventana que corta a los 2 chunks). Suite
+**202/202** (`tests/test_upload_progress.py`, 4 reglas).

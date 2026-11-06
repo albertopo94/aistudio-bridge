@@ -11,6 +11,7 @@ import base64
 import os
 import re
 import shutil
+import sys
 import time
 from urllib.parse import urlsplit
 
@@ -30,6 +31,52 @@ from .sync import (apply_to_branch, archive_repo, inline_source, mount_repo,
 AGENT = "antigravity-preview-09-2026"
 DEFAULT_TEST_COMMAND = ["python3", "tests/test_main.py"]
 AGENTS_TARGET = "/.agents/AGENTS.md"
+
+
+def _human_rate(bytes_per_second: float) -> str:
+    """A throughput in the unit a person reads it in."""
+    for unit, size in (("MiB", 1024 ** 2), ("kB", 1024)):
+        if bytes_per_second >= size:
+            return f"{bytes_per_second / size:.1f} {unit}/s"
+    return f"{bytes_per_second:.0f} bytes/s"
+
+
+def _human_duration(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    if seconds < 60:
+        return f"{seconds}s"
+    return f"{seconds // 60}m{seconds % 60:02d}s"
+
+
+def _upload_progress():
+    """An ``on_progress`` callback that says where a long upload stands.
+
+    The service uploads at ~1.1-1.6 MiB/s whatever your own line does, so 500
+    MB takes about six minutes and 1.5 GiB about sixteen. Silence that long is
+    indistinguishable from a hang, so each acknowledged chunk is reported with
+    the rate measured from this upload (not a remembered average) and the ETA
+    that rate implies.
+
+    Bytes the service has not acknowledged are never claimed: an upload the
+    account's fair-use window refuses halfway ends at the line for what did
+    get through.
+    """
+    started = time.monotonic()
+
+    def report(sent: int, total: int) -> None:
+        elapsed = time.monotonic() - started
+        rate = sent / elapsed if (elapsed > 0 and sent) else 0.0
+        head = f"upload {sent}/{total} bytes at {_human_rate(rate)}"
+        if sent >= total or rate <= 0:
+            print(f"{head} done in {_human_duration(elapsed)}",
+                  file=sys.stderr, flush=True)
+        else:
+            eta = (total - sent) / rate
+            print(f"{head} eta {_human_duration(eta)}",
+                  file=sys.stderr, flush=True)
+
+    return report
+
 
 
 def _expired_report(record: dict) -> str:
@@ -139,6 +186,7 @@ class TaskRunner:
                     path=f"workspace/{repo_name}/",
                     file_path=archive_path,
                     extract=True,
+                    on_progress=_upload_progress(),
                 )
             except UploadError as exc:
                 # A sandbox holding a half-uploaded archive is of no use to

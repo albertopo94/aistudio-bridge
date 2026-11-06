@@ -322,6 +322,16 @@ a machine with a 51.86 Mbps uplink. Splitting an archive into parts does not
 raise the window, it would only make a long upload resumable — which is why it
 is not built yet.
 
+Because that pace makes a large tree a multi-minute wait, `--local-repo` prints
+what the service has accepted so far, the rate measured from the upload itself,
+and the ETA that rate implies — on stderr, so `> report.txt` still captures
+only the report. Sample output:
+
+```
+upload 5242880/314572800 bytes at 1.4 MiB/s eta 3m31s
+upload 314572800/314572800 bytes at 1.5 MiB/s done in 3m22s
+```
+
 ## Limits worth knowing
 
 **Two clocks expire, and confusing them costs you a task:**
