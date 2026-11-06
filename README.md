@@ -29,9 +29,10 @@ you ──► remote-worker run "task" ──► Google sandbox (agent edits the
 - Python 3.10+ (standard library only — no third-party dependencies)
 - macOS 13+ (Intel or Apple Silicon)
 - `git` on PATH
-- A Gemini API key. The free tier works: environment compute is not billed
-  during the agent's preview, and no paid tier was needed for any task in
-  `plan-remote-worker/01-evidencia-poc.md`.
+- A Gemini API key. The free tier works for **Antigravity** tasks:
+  environment compute is not billed during the agent's preview, and no paid
+  tier was needed for any task in `plan-remote-worker/01-evidencia-poc.md`.
+  That claim covers Antigravity only — see [What a task costs](#what-a-task-costs).
 - Optional: [Engram](https://github.com/Gentleman-Programming/engram) on
   PATH. Without it, memory tools report "unavailable" and the task still runs.
 
@@ -135,6 +136,15 @@ Only `gemini-4-argon` and `gemini-3.8-flash` are accepted. A lower model is
 rejected as a usage error instead of being silently downgraded: cost and
 quality are your decision.
 
+Both are valid inline with `agent_config`. Note that Google's *managed agent*
+documentation lists only `gemini-3.8-flash`, `gemini-3.6-flash` and
+`gemini-3.5-flash-lite` for saved agents — `gemini-4-argon` is not in that
+set. The product sends `agent_config` per interaction (which is what makes
+per-task model switching possible), and Argon is proven working that way, but
+if Google ever narrows the inline set to the managed one, `--model
+gemini-4-argon` would break. The floor is your choice, not an availability
+limit: two more models exist and are deliberately refused.
+
 Switching between them:
 
 ```bash
@@ -166,15 +176,64 @@ Rule of thumb from the skill: if the worker must **edit code in a repo**, use
 
 ## Limits worth knowing
 
+**Two clocks expire, and confusing them costs you a task:**
+
+| What | How long | When it goes away |
+|---|---|---|
+| The **sandbox** (your files) | 7 days; snapshotted after 15 min idle | `continue` cannot resume it — start a new run |
+| The **interaction** (the conversation) | 1 day on the free tier, 55 on a paid tier | `previous_interaction_id` stops resolving |
+
+A task left over the weekend is gone even where the sandbox still exists, and
+on the free tier a `continue` is a day late after midnight. Finish a task in
+the session you started it.
+
+**The sandbox.** Ubuntu with `curl`, `wget`, `git`, `jq`, `ripgrep` and
+`gcloud`; Python 3.12 with numpy, pandas, requests and google-genai; Node 22
+with typescript and create-vite. 4 cores and 16 GB, fixed. Startup is around
+5 seconds. The worker reads **text and image** files only — a repository with
+binaries has parts it cannot see. A `pip install` or `npm install` the worker
+runs during a task lasts only for that sandbox: it survives only if the same
+environment is reused.
+
+**Budgets.** `max_total_tokens` is best-effort: it is checked between steps,
+so a run can overshoot slightly before reporting `incomplete`. Cached tokens do
+not count against it. Separately, the service compacts long conversations
+automatically around 135k tokens — that protects the *context*, while your
+budget caps *total usage*; they are not the same number.
+
+**Request shape.** Generation parameters (`temperature`, `top_p`, `top_k`,
+`stop_sequences`, `max_output_tokens`) are rejected with a 400 by this agent,
+and it cannot force a JSON schema on its answer. The product sends neither,
+which is an invariant, not an oversight.
+
+**Version pin.** The agent is addressed as `antigravity-preview-09-2026`: an
+explicit preview revision. Google documents no deprecation policy for it, so
+when that revision is retired the first symptom is an error naming the agent,
+and the fix is one constant in `remote_worker/runner.py`.
+
 - A `repository` source is capped at **500 MB** by the service. Larger
   projects need the upload path (not implemented yet).
-- Sandboxes are recycled: idle for 15 minutes they are snapshotted and
-  stopped, and after **7 days** they are deleted. Finish a task in the same
-  session you started it.
 - Free-tier quota is per project and per day. `tokens:` after each run tells
   you what it cost; `--budget` caps a single task.
 - Hitting the budget is not a failure: the run exits 0, reports
   `incomplete`, and prints the exact `continue` command.
+- A rate limit exits with the API's own message and **never retries**. That is
+  deliberate: a continuation carries `previous_interaction_id`, so a blind
+  retry is not idempotent — it would fork a second branch of the conversation
+  and bill the same work twice. Wait, then re-run the printed command.
+
+## What a task costs
+
+Antigravity tasks cost **US$0** on the free tier for every task in this
+project's evidence (preview, no billing account attached). For planning past
+the preview, Google's own baselines are **US$0.25–3.25** for a typical task
+and roughly US$5 at the high end, with 50–70% of input usually cached. Real
+counts from this product: ~6k tokens for a memory lookup, ~23k trivial,
+~29k–97k for a code task.
+
+A Deep Research backend would not share that price — about US$1–3 per task
+(US$3–7 for the Max variant), with no declared free-tier eligibility. That is
+one reason it is not the engine behind `ask`.
 
 ## Security
 
@@ -192,6 +251,30 @@ Rule of thumb from the skill: if the worker must **edit code in a repo**, use
 - The worker may call `memory_search`, `memory_save` and `memory_context`.
   Nothing that writes to your filesystem beyond the repository, and nothing
   that deletes memory.
+
+### What Google keeps server-side
+
+Storage is on by default and the product does not turn it off, because it
+cannot: a task is resumed through `previous_interaction_id`, which is
+incompatible with `store=false`. So for every task the API keeps — server
+side, browsable at [aistudio.google.com/logs](https://aistudio.google.com/logs)
+for 1 day on the free tier and 55 on a paid tier — the task text, the context
+of the mounted repository, and whatever the memory tools returned.
+
+Treat that as a real boundary. Do not delegate a repository whose contents
+must not reach Google, and do not put secrets in a task prompt. There is no
+credential in the sandbox for an injected instruction to steal, which is the
+point of the design — but the task text itself is not private.
+
+### Delegate against repositories you trust
+
+A mounted repository can carry its own `.agents/hooks.json`, and the service
+runs those hooks inside the sandbox on the agent's first tool call. So a
+third-party repository can execute code in the sandbox and, while sandbox
+egress is unlimited (the default), read `/workspace` and send it somewhere
+else. Against your own repositories the risk is effectively nil; against an
+unfamiliar fork it is not. Delegate only against repositories you own or
+trust.
 
 ## Development
 

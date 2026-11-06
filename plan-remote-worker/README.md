@@ -47,11 +47,13 @@ como branch con diff verificable.
 
 - Investigación: completa (documento base: `investigacion-google-antigravity-engram-gentle-ai.md`).
 - PoC: 7/7 pasos PASS (Ruta A 1-5 + Fase 2 E1-E3). Evidencia en `poc/`.
-- Producto: **WU-0 a WU-7 completos (v0.1.0 → v0.9.0)**.
+- Producto: **WU-0 a WU-7 completos (v0.1.0 → v0.9.0)**, y backlog G1-G30 en curso
+  sobre la rama `feat/gaps-backlog` (v0.10.0).
   - Setup interactivo con API key guardada en `~/.remote-worker/config.json` (0600), sin `.env` ni exports obligatorios.
   - Comandos disponibles: `setup` (con `--install-skill`, `--list-skill-backups`, `--restore-skill`), `run`, `ask` (con `--stream`), `status`, `continue`, `cancel`.
-  - 81 tests unitarios contra fake HTTP server.
-  - Siguiente sesión: ver la sección **Próxima sesión — self-test** abajo.
+  - 95 tests unitarios contra fake HTTP server.
+  - Gaps cerrados en v0.10.0: G3, G6, G8, G14, G16 (doc), G17 (doc), G20, G21, G27, G28 (doc) + la regla de README para G10. Q1-Q3 del self-test hechos inline. G15 probado en vivo.
+  - Seguimiento de la feature: `odd/tasks/remote-worker-gaps.md` (S1-S9, T1-T19, Log).
 - Repo público: <https://github.com/albertopo94/aistudio-bridge>
 
 ## Próxima sesión — self-test (el producto corrigiendo al producto)
@@ -63,14 +65,26 @@ tareas de este propio repo, **antes que cualquier otro fix** pendiente
 Condición dura: el worker monta el repo **desde GitHub**, no del worktree
 local. Esta sección debe estar commiteada y pushed antes de delegar.
 
-Orden acordado para la próxima sesión (2026-11-05):
+Orden acordado para la próxima sesión (2026-11-05), estado 2026-11-06:
 1. Smoke real del fix G15/G22 (v0.9.3): verificar en vivo que un turno de
    continuación y un `continue` llevan el contrato (system_instruction+tools).
-2. Self-test Q1-Q3 (abajo).
+   **HECHO en vivo 2026-11-06**: `ask` que fuerza un round-trip de memoria con
+   `REMOTE_WORKER_TRACE`; el trace muestra 2 turnos (el 2.º con
+   `previous_interaction_id`), ambos con el mismo contrato de 1052 chars y el
+   mismo set de tools (incluidas las 3 memory tools).
+2. Self-test Q1-Q3 (abajo). **HECHO inline 2026-11-06 (v0.10.0)**: el usuario
+   cambió de opinión y decidió NO delegarlos al worker (se hicieron en la
+   sesión principal). Q1 sección de delegación ✓, Q2 self-repo + sample
+   output ✓, Q3 alias `-v` ✓ (3 tests). El checklist de prueba 2-6 de abajo
+   (skill discovery, key sin env, purge, tests, reporte, no-merge) queda como
+   la primera delegación real contra GitHub cuando el usuario la dispare.
 3. G12+G13 (cancel server-side + background+polling) — los dos medias que
    más tocan el uso diario.
 4. G9 (404 amigable).
 5. G1/G2/G17/G18 → el resto por el índice consolidado G1-G30.
+
+Ejecución del backlog: se sigue en la rama `feat/gaps-backlog` con tracking
+en `odd/tasks/remote-worker-gaps.md` (spec S1-S9, tasks T1-T19, Log).
 
 ### Los 3 fixes del primer turno
 
@@ -111,9 +125,9 @@ Detalle completo por fuente en las secciones "Cobertura doc" de abajo.
 
 | Prioridad | Gaps |
 |---|---|
-| **media-alta / bug** | **G15** continuationes pierden system_instruction+tools (→ worker sin contrato ni memoria; con G22 también se pierde el puntero a AGENTS.md). **FIX v0.9.3** (commit 6fad9db): reenvío en run/ask/continue + record con kind/repo_dir. Pendiente: G22 parte b (source inline .agents/AGENTS.md) y smoke real con API. |
-| media | G1 network allowlist (factible directo en create_interaction; desbloquea G10), G10 hooks de repos de terceros (regla: solo repos confiables), G12 cancel server-side, G13 background+polling, G16 dos TTLs (1d interacción vs 7d env), G17 store/privacidad, G18 sin interactions.get, G22 AGENTS.md fuera de auto-load, G5 PoC 1.5GB, G9 404 amigable |
-| low / doc | G2 cleanup, G3 límites agente, G4 upload resumable (protocolo), G6 compaction/caching, G7 --reuse-env, G8 stack sandbox, G11/G28 multimodal (--image/PDF, builder único), G14/G27 costos README ($0 solo Antigravity), G19 429, G20 pin preview, G21 set modelos managed sin Argon, G23 skills inline, G24 run sin google_search, G25 modo research, G26 store forzado, G29 preguntas deep-research, G30 background para research |
+| **media-alta / bug** | **G15** continuationes pierden system_instruction+tools (→ worker sin contrato ni memoria; con G22 también se pierde el puntero a AGENTS.md). **FIX v0.9.3** (commit 6fad9db): reenvío en run/ask/continue + record con kind/repo_dir. **PRUEBA EN VIVO PASS 2026-11-06**: trace de una corrida real muestra 2 turnos (inicial + continuación con `previous_interaction_id`), ambos con el contrato de 1052 chars y el set de tools completo. Pendiente: G22 parte b (source inline .agents/AGENTS.md). |
+| media | G1 network allowlist (factible directo en create_interaction; desbloquea G10), G10 hooks de repos de terceros (**regla documentada en README Security v0.10.0**; el allowlist sigue pendiente y es la mitigación real), G12 cancel server-side, G13 background+polling, G16 dos TTLs (**README v0.10.0** los separa; queda el mensaje de error → G9), G17 store/privacidad (**README v0.10.0** declara qué queda server-side; falta `interactions.delete` → G2), G18 sin interactions.get, G22 AGENTS.md fuera de auto-load, G5 PoC 1.5GB, G9 404 amigable |
+| low / doc | G2 cleanup, ~~G3~~ **doc v0.10.0**, G4 upload resumable (protocolo), ~~G6~~ **doc v0.10.0**, G7 --reuse-env, ~~G8~~ **doc v0.10.0**, G11/G28 multimodal (--image/PDF, builder único; ~~G28 doc v0.10.0~~), ~~G14/G27~~ **doc v0.10.0** (sección "What a task costs", $0 acotado a Antigravity), G19 429 (falta clasificación explícita en el cliente, incluido SSE), ~~G20~~ **doc v0.10.0**, ~~G21~~ **doc v0.10.0** (Argon fuera del set managed, documentado), G23 skills inline, G24 run sin google_search, G25 modo research, G26 store forzado, G29 preguntas deep-research, G30 background para research |
 
 ## Cobertura doc `agent-environment` (auditoría 2026-11-05)
 

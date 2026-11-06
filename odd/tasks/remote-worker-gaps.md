@@ -80,3 +80,25 @@ the whole backlog, work unit by work unit, on a feature branch.
   references `worker-poc-toy`; sample output labelled; prompts name trigger+mode).
 - **L7** (blocker, outside this list): T1 (live G15 smoke) needs the user's API
   quota. Command given in conversation. Until it runs, T3+ continue on the branch.
+
+- **L8** (evidence) T1 G15 live proof PASS against the real API. The user ran an
+  `ask` that forced a `memory_search` round-trip with `REMOTE_WORKER_TRACE` set.
+  The trace shows 2 turns: turn 0 (initial) and turn 1 (continuation,
+  `previous_interaction_id` set) BOTH carry the 1052-char worker contract and the
+  full tool set including the 3 `function` memory tools. Before v0.9.3 the
+  continuation ran without contract or memory tools. This is the proof S7 asked for.
+
+- **L9** (decision) G19 moved out of the docs-only task: its real fix is classifying
+  the 429 in the client (SSE currently flattens the status to 0), not a README line.
+  It joins the code tasks.
+- **L10** (evidence) Slice 2, docs work unit (v0.10.0). Gaps closed as documentation
+  from the 7 audits: G3 (worker reads text+image only), G6 (compaction ~135k vs
+  `max_total_tokens`), G8 (sandbox stack, 4 cores/16 GB, startup ~5s), G14+G27 ("What
+  a task costs": US$0 evidence for Antigravity, Google baselines US$0.25-3.25/US$5,
+  Deep Research US$1-7 so the free-tier claim is scoped to Antigravity), G16 (two
+  clocks table: sandbox 7d vs interaction 1d free/55 paid), G17 ("What Google keeps
+  server-side" + why `store=false` is impossible for a resumable task), G20 (preview
+  pin, symptom and one-constant fix), G21 (Argon outside the managed model set), G28
+  (multimodal shape noted for G11), G10 (rule in README Security: delegate only
+  against repos you own or trust). Version 0.9.3 -> 0.10.0 (MINOR: the trace and `-v`
+  are new public surface). 95/95 tests green; README anchors and tables validated.
