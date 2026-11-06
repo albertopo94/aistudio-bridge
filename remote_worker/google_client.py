@@ -329,26 +329,73 @@ class UploadClient:
         self._timeout = timeout
         self._chunk_size = chunk_size
 
-    def upload(self, *, environment_id: str, path: str, data: bytes) -> dict:
+    def upload(self, *, environment_id: str, path: str, data: bytes,
+               extract: bool = False) -> dict:
         """Upload ``data`` into the environment at ``path``.
 
-        Returns the parsed final response (file metadata, or the file list
-        when the service extracts the archive, or {} when it answers with an
-        empty body).
+        ``extract=True`` tells the service to unpack a tar archive into the
+        directory named by ``path``; with a target ending in ``/`` the archive
+        members land directly there instead of under a directory named after
+        the file.
+
+        Returns the parsed final response (file metadata, the ``files``
+        envelope the service sends for an extracted archive, or {} when it
+        answers with an empty body).
         """
         if not environment_id:
             raise ValueError("environment_id is required")
         if not path:
             raise ValueError("path is required")
-        session = self._init_session(environment_id, path, len(data))
-        self._put_chunks(session, data, len(data))
+        return self._run_upload(
+            environment_id, path, len(data), extract,
+            lambda start, end: data[start:end + 1],
+        )
+
+    def upload_file(self, *, environment_id: str, path: str, file_path: str,
+                    extract: bool = False) -> dict:
+        """Upload a file from disk, one chunk at a time.
+
+        ``upload`` takes the whole payload as bytes, which is right for a small
+        inline file but wrong for the repository archive G4 sends: a tree near
+        the 1.5 GiB ceiling must never have to fit in memory.
+        """
+        if not environment_id:
+            raise ValueError("environment_id is required")
+        if not path:
+            raise ValueError("path is required")
+        if not os.path.isfile(file_path):
+            raise ValueError(f"upload source {file_path!r} is not a file")
+        total = os.path.getsize(file_path)
+        if total == 0:
+            raise ValueError(f"upload source {file_path!r} is empty")
+        with open(file_path, "rb") as handle:
+            def read(start: int, end: int) -> bytes:
+                handle.seek(start)
+                return handle.read(end - start + 1)
+            return self._run_upload(environment_id, path, total, extract, read)
+
+    def _run_upload(self, environment_id: str, path: str, total: int,
+                    extract: bool, read) -> dict:
+        session = self._init_session(environment_id, path, total, extract)
+        self._put_chunks(session, read, total)
         return self._final_read(session)
 
     def _init_session(self, environment_id: str, path: str,
-                      total: int) -> str:
+                      total: int, extract: bool = False) -> str:
+        query = "uploadType=resumable"
+        if extract:
+            # extract belongs to the init call only: the docs are explicit
+            # that the chunks never carry it.
+            query += "&extract=true"
+        target = _quote_path(path)
+        if path.endswith("/") and not target.endswith("/"):
+            # The trailing slash is what tells the service to treat the target
+            # as a directory and unpack archive members straight into it.
+            # _quote_path strips it, so it is restored here.
+            target += "/"
         url = (f"{self._base_url}/upload/v1beta/environments/"
                f"{urllib.parse.quote(environment_id, safe='')}/files/"
-               f"{_quote_path(path)}?uploadType=resumable")
+               f"{target}?{query}")
         request = urllib.request.Request(
             url, data=b"", method="PUT",
             headers={
@@ -370,11 +417,11 @@ class UploadClient:
             )
         return location
 
-    def _put_chunks(self, session: str, data: bytes, total: int) -> None:
+    def _put_chunks(self, session: str, read, total: int) -> None:
         start = 0
         end = min(self._chunk_size, total) - 1
         while True:
-            chunk = data[start:end + 1]
+            chunk = read(start, end)
             headers = {
                 "Content-Type": "application/octet-stream",
                 "Content-Range": f"bytes {start}-{end}/{total}",
@@ -498,6 +545,24 @@ class EnvironmentsClient:
         raw = _send("DELETE", url, self._api_key, self._timeout)
         text = raw.decode("utf-8").strip()
         return json.loads(text) if text else {}
+
+    def create_environment(self, sources=None, network=None) -> dict:
+        """Create an environment and return it, id included.
+
+        The body is empty for a bare sandbox: the ``Environment`` resource has
+        no top-level ``type`` field (only ``Source.type`` does), so an
+        invented ``{"type": "remote"}`` is rejected by the service.
+        """
+        body = {}
+        if sources:
+            body["sources"] = sources
+        if network:
+            body["network"] = network
+        url = self._base_url + "/v1beta/environments"
+        _trace_request("POST", url, body)
+        raw = _send("POST", url, self._api_key, self._timeout,
+                    json.dumps(body).encode("utf-8"))
+        return json.loads(raw.decode("utf-8"))
 
     def _env_url(self, environment_id: str) -> str:
         if not environment_id:

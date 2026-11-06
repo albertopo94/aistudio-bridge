@@ -19,12 +19,12 @@ from .function_loop import (RUNNING_STATUSES, WatchLimitExceeded,
                             run_until_complete, wait_until_done)
 from .google_client import (EnvironmentsClient, FilesClient,
                             InteractionsClient, InteractionsError,
-                            InteractionsTimeoutError)
+                            InteractionsTimeoutError, UploadClient)
 from .planner import (agent_config, network_config, task_parts,
                       worker_contract)
 from .state import DEFAULT_ROOT, TaskStore, _slug
-from .sync import (apply_to_branch, inline_source, mount_repo, run_tests,
-                   INLINE_TOTAL_LIMIT_BYTES)
+from .sync import (apply_to_branch, archive_repo, inline_source, mount_repo,
+                   run_tests, INLINE_TOTAL_LIMIT_BYTES, UPLOAD_LIMIT_BYTES)
 
 AGENT = "antigravity-preview-09-2026"
 DEFAULT_TEST_COMMAND = ["python3", "tests/test_main.py"]
@@ -56,6 +56,7 @@ class TaskRunner:
 
     def __init__(self, *, project: str, api_key: str,
                  client=None, files=None, environments=None,
+                 uploads=None,
                  dispatcher=None, store=None,
                  workdir: str | None = None,
                  memory_enabled: bool = True,
@@ -67,6 +68,7 @@ class TaskRunner:
         self._client = client
         self._files = files
         self._environments = environments
+        self._uploads = uploads
         self.store = store or TaskStore(project=project)
         # Stable across sessions so a recorded task can be resumed later;
         # the process temp directory would not survive a restart.
@@ -100,7 +102,50 @@ class TaskRunner:
             self._environments = EnvironmentsClient(api_key=self._api_key)
         return self._environments
 
-    def run(self, *, task: str, repo_url: str, model: str | None = None,
+    @property
+    def uploads(self):
+        if self._uploads is None:
+            self._uploads = UploadClient(api_key=self._api_key)
+        return self._uploads
+
+    def _upload_local_repo(self, local_repo: str, repo_name: str, *,
+                           sources: list, network, task_id: str) -> dict:
+        """Send a local working tree into a fresh sandbox (G4).
+
+        The tree is archived, measured against the ceiling this project
+        measured with the G5 PoC, and uploaded with ``extract=true`` into
+        ``/workspace/<name>/`` so the sandbox sees exactly the layout a
+        mounted repository would have given it.
+        """
+        os.makedirs(self.workdir, exist_ok=True)
+        archive_path = os.path.join(self.workdir, f"{task_id}.tar.gz")
+        archive = archive_repo(local_repo, archive_path)
+        if archive["bytes"] > UPLOAD_LIMIT_BYTES:
+            size_gib = archive["bytes"] / (1024 ** 3)
+            limit_gib = UPLOAD_LIMIT_BYTES / (1024 ** 3)
+            raise ValueError(
+                f"this repository archives to {size_gib:.2f} GiB, above the "
+                f"{limit_gib:.2f} GiB ceiling a sandbox accepts for an upload "
+                "(measured with the G5 benchmark). Push it to a git host and "
+                "use --repo <url> instead, or shrink the working tree."
+            )
+        environment = self.environments.create_environment(
+            sources=sources, network=network,
+        )
+        environment_id = environment.get("id")
+        if not environment_id:
+            raise ValueError("the service did not return an environment id")
+        self.uploads.upload_file(
+            environment_id=environment_id,
+            path=f"workspace/{repo_name}/",
+            file_path=archive_path,
+            extract=True,
+        )
+        return {"id": environment_id, "archive_bytes": archive["bytes"],
+                "archive_files": archive["files"]}
+
+    def run(self, *, task: str, repo_url: str | None = None,
+            model: str | None = None,
             budget: int | None = None,
             branch: str | None = None,
             background: bool = False,
@@ -108,13 +153,25 @@ class TaskRunner:
             reuse_env: str | None = None,
             agents_file: str | None = None,
             mount_files=None,
-            images=None) -> dict:
+            images=None,
+            local_repo: str | None = None) -> dict:
         config = agent_config(model=model, budget=budget)
         network = network_config(allow_domains=allow_domains,
                                  no_network=no_network)
+        if local_repo is not None and repo_url is not None:
+            raise ValueError("pass either a repository URL or --local-repo")
+        if local_repo is None and repo_url is None:
+            raise ValueError("one of repo_url or --local-repo is required")
         if reuse_env is not None and not reuse_env.strip():
             raise ValueError("--reuse-env needs an environment id")
-        repo_name = _repo_name(repo_url)
+        if local_repo is not None:
+            # A local tree is not reachable from the sandbox, so it travels as
+            # an uploaded archive. Its own path is what the result is cloned
+            # from afterwards, so git truth never leaves the machine.
+            repo_url = os.path.abspath(local_repo)
+            repo_name = _repo_name(os.path.basename(repo_url.rstrip("/")))
+        else:
+            repo_name = _repo_name(repo_url)
         repo_dir = f"/workspace/{repo_name}"
         task_id = f"t_{int(time.time())}"
         branch = branch or f"worker/{repo_name}-{int(time.time())}"
@@ -127,10 +184,17 @@ class TaskRunner:
             memory_tools=self.memory_enabled,
         )
 
-        sources = [mount_repo(repo_url, repo_dir)]
+        sources = [] if local_repo is not None else [mount_repo(repo_url, repo_dir)]
         sources.extend(self._inline_sources(agents_file=agents_file,
                                             mount_files=mount_files))
-        if reuse_env:
+        upload_info = None
+        if local_repo is not None:
+            upload_info = self._upload_local_repo(
+                local_repo, repo_name, sources=sources, network=network,
+                task_id=task_id,
+            )
+            environment = {"id": upload_info["id"]}
+        elif reuse_env:
             # An existing sandbox is named by id: it already has its own
             # sources and network rules, so only the mounts this task needs
             # are added to it. Dependencies installed by an earlier task
@@ -210,6 +274,13 @@ class TaskRunner:
             "branch": branch,
             "report": self.client.last_model_output(final),
         }
+        if upload_info:
+            # What went up, so the user is not guessing about a 900 MB upload.
+            result.update({
+                "environment_id": upload_info["id"],
+                "archive_bytes": upload_info["archive_bytes"],
+                "archive_files": upload_info["archive_files"],
+            })
         if status != "completed":
             return result  # incomplete / failed: nothing to bring back
 

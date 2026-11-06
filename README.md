@@ -126,6 +126,7 @@ merges the result itself — review the branch, then merge it with your own git.
 | `run "<task>" --repo <url>` | Delegate one CODE task, bring the diff back |
 | `run "<task>" --repo <url> --background` | Same, but the service runs it and we poll — a dropped connection cannot lose the result |
 | `run "<task>" --repo <url> --reuse-env <id>` | Run in a sandbox you already have, keeping the dependencies an earlier task installed |
+| `run "<task>" --local-repo <path>` | Upload a local working tree (up to 1.5 GiB) instead of cloning a URL |
 | `run "<task>" --repo <url> --agents-file ./AGENTS.md` | Send your own AGENTS.md where the service reads it (`/.agents/AGENTS.md`) |
 | `run "<task>" --repo <url> --mount-file <local>:<target>` | Place a local text file inside the sandbox (repeatable) — skills, extra norms |
 | `run "<task>" --repo <url> --image shot.png` | Send an image with the task: "look at this screenshot" (repeatable) |
@@ -218,6 +219,7 @@ Three channels, and which one you use changes what the agent reads by default:
 | Channel | What the service does with it |
 |---|---|
 | `--repo` | Clones the repository at `/workspace/<name>` |
+| `--local-repo` | Uploads a working tree to `/workspace/<name>` (see below) |
 | `--agents-file` | Written to `/.agents/AGENTS.md`, which the service **auto-loads as system instructions** |
 | `--mount-file local:target` | Written verbatim at `target`; `.agents/skills/<name>/SKILL.md` is auto-discovered as a skill |
 
@@ -238,6 +240,32 @@ be text — the tool checks both before sending anything.
 `--reuse-env <environment_id>` runs the task in a sandbox you already have, so
 dependencies an earlier task installed are still there. `clean` prints the ids
 you hold. The task's repository is still mounted into it.
+
+### A repository that only exists on your machine
+
+`--repo <url>` makes the sandbox clone the repository itself, which needs a URL
+it can reach and caps at 500 MB. `--local-repo <path>` covers both limits: the
+tool archives your working tree and uploads it into the sandbox, so the agent
+works on a repository that was never pushed anywhere.
+
+```bash
+remote-worker run "fix the flaky test" --local-repo ~/code/private-thing
+```
+
+What travels is what `git status` shows — tracked files plus untracked files
+that are not ignored. Ignored build output and `.git` stay home, so the sandbox
+gets a snapshot of your files without any history. The result still comes back
+as a branch in your local repository, cloned from the path you named.
+
+Two numbers worth knowing, both measured rather than guessed:
+
+- The sandbox caps a `repository` source at **500 MB**, which is why the upload
+  path exists.
+- A direct upload tops out at **1.5 GiB** (1530 MiB uploaded cleanly; the next
+  chunk was refused with "File size exceeds maximum allowed limit"). Above
+  that the tool stops before creating a sandbox and tells you to push the
+  repository to a git host and use `--repo` instead of failing halfway through
+  a long upload.
 
 ## Limits worth knowing
 

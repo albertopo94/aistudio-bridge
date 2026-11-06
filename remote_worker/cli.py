@@ -40,7 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", help="delegate one task")
     run.add_argument("task", help="the task, in plain language")
-    run.add_argument("--repo", required=True, help="repository URL to mount")
+    source = run.add_mutually_exclusive_group(required=True)
+    source.add_argument("--repo", help="repository URL to mount")
+    source.add_argument(
+        "--local-repo", metavar="PATH",
+        help="send a local working tree instead of a repository URL: it is "
+             "archived and uploaded into the sandbox (no git history "
+             "travels), which is the only way a local-only or oversized "
+             "repository can reach it",
+    )
     run.add_argument("--model", default=None,
                      help=f"one of: {', '.join(planner.ALLOWED_MODELS)} "
                           "(default: stored config)")
@@ -194,6 +202,9 @@ def main(argv=None, *, runner=None) -> int:
             if args.reuse_env is not None and not args.reuse_env.strip():
                 parser.error("--reuse-env needs an environment id "
                              "('remote-worker clean' lists what you hold)")
+            if args.local_repo is not None and args.reuse_env is not None:
+                parser.error("--local-repo builds a fresh sandbox, so it "
+                             "cannot be combined with --reuse-env")
             return _report_run(runner.run(
                 task=args.task, repo_url=args.repo, model=model,
                 budget=budget, branch=args.branch,
@@ -204,6 +215,7 @@ def main(argv=None, *, runner=None) -> int:
                 agents_file=args.agents_file,
                 mount_files=mount_files,
                 images=images,
+                local_repo=args.local_repo,
             ))
         if args.command == "clean":
             return _report_clean(runner.clean(apply=args.yes))

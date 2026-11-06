@@ -26,6 +26,12 @@ import tempfile
 #: Documented cap for a ``repository`` source (docs/agent-environment).
 REPOSITORY_SOURCE_LIMIT_BYTES = 500 * 1024 * 1024
 
+#: Measured ceiling of a direct resumable upload into a sandbox (G5 PoC).
+#: 153 chunks of 10 MB (1530 MiB) were accepted and the next chunk returned
+#: 400 "File size exceeds maximum allowed limit", so the guard sits at the
+#: last size the service demonstrably takes rather than at a guessed number.
+UPLOAD_LIMIT_BYTES = 1530 * 1024 * 1024
+
 #: Inline sources are capped at 1 MB per file and 2 MB in total by the
 #: environment documentation. Enforcing that here turns a request the service
 #: would reject into an explanation the user can act on.
@@ -48,6 +54,45 @@ def tar_gz_bytes(files: dict) -> bytes:
             info.size = len(content)
             tar.addfile(info, io.BytesIO(content))
     return buffer.getvalue()
+
+
+def archive_repo(repo_path: str, dest: str) -> dict:
+    """Pack a local git working tree into a gzip tarball at ``dest``.
+
+    The uploaded path exists because the tree is too big for the 500 MB
+    ``repository`` source, so the archive streams through :mod:`tarfile`
+    instead of being built in memory: a large repository must not have to
+    fit in RAM before it can travel.
+
+    What travels is what the user sees in ``git status``: tracked files plus
+    untracked-but-not-ignored ones. Ignored build output and ``.git`` stay
+    home, which is also what the return path expects, since it overlays files
+    onto a fresh clone rather than trusting the sandbox's history.
+
+    Returns ``{"path", "bytes", "files"}``.
+    """
+    if not os.path.isdir(repo_path):
+        raise ValueError(f"local repository {repo_path!r} is not a directory")
+    tracked = _git(repo_path, "ls-files", "-z").stdout
+    untracked = _git(repo_path, "ls-files", "-z", "--others",
+                     "--exclude-standard").stdout
+    names = sorted({name for name in tracked.split("\0") if name})
+    names += sorted({name for name in untracked.split("\0") if name} - set(names))
+    if not names:
+        raise ValueError(
+            f"local repository {repo_path!r} has no files to archive"
+        )
+    written = 0
+    with tarfile.open(dest, mode="w:gz") as tar:
+        for name in names:
+            full = os.path.join(repo_path, name)
+            if os.path.isdir(full) or not os.path.lexists(full):
+                continue
+            # recursive=False: git already listed every path, so recursing
+            # would both duplicate entries and drag in ignored files.
+            tar.add(full, arcname=name, recursive=False)
+            written += 1
+    return {"path": dest, "bytes": os.path.getsize(dest), "files": written}
 
 
 def inline_source(local_path: str, target: str,
