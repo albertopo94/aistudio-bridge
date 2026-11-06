@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.13.0] — 2026-11-06
+
+### Added
+
+- `run --allow-domain <domain>` (repeatable) and `run --no-network`: limit or
+  close the sandbox's outbound traffic instead of accepting the default
+  anything-goes egress. The fence is set when the sandbox is created, and
+  every continuation rejoins it by id. The tool warns when a `*.example.com`
+  entry lacks its bare `example.com`, which the service's wildcard does not
+  cover (G1).
+- `clean` lists the sandboxes your account still holds; `clean --yes` deletes
+  the ones no unfinished task is using. Finished tasks used to leave their
+  sandbox — mounted repository included — alive for the full 7-day TTL (G2).
+
+### Changed
+
+- README "Delegate against repositories you trust" now names the flag that
+  makes exfiltration from a third-party repository fail, instead of asking
+  for trust alone.
+
 ## [0.12.0] — 2026-11-06
 
 ### Added
