@@ -452,3 +452,60 @@ Independiente de G5 (su reproducción hace su propio `DELETE`).
 - PoC y evidencia: `poc/` (scripts, logs/, e3-work/clone con branch worker/poc-e3)
 - Clave: `poc/.env` (git-ignored, 600). El producto usará el mecanismo de
   credenciales del usuario, nunca este archivo.
+
+## Estado del backlog — cierre
+
+Todo el índice G1–G30 queda cerrado o explícitamente descartado, con la
+evidencia de cada caso. Trabajo en la rama `feat/gaps-backlog`; el detalle de
+cada unidad (decisiones, RED/GREEN, hallazgos) vive en
+`odd/tasks/remote-worker-gaps.md`.
+
+| Gap | Estado | Evidencia |
+|---|---|---|
+| G1 | cerrado | `run --allow-domain` / `--no-network` (v0.13.0) |
+| G2 | cerrado | `clean` dry-run por defecto + `--yes`; list/delete de environments (v0.13.0) |
+| G3 | doc | README "Limits": el agente lee texto e imagen (v0.10.0) |
+| G4 | cerrado | `run --local-repo`: tar del working tree + upload resumable con `extract=true`, guard contra el techo medido (v0.17.0) |
+| G5 | cerrado (medido en vivo) | Techo real **1.5 GiB**: 1530 MiB aceptados, 1536 MiB rechazados con 400 "File size exceeds maximum allowed limit" |
+| G6 | doc | compactación ~135k vs `max_total_tokens` (v0.10.0) |
+| G7 | cerrado | `run --reuse-env` (v0.14.0) |
+| G8 | doc | stack del sandbox, 4 cores/16 GB (v0.10.0) |
+| G9 | cerrado | `continue` sobre sandbox expirado → status `expired`, TTL 7 días, no reanudable (v0.10.1) |
+| G10 | doc | README Security: delegar solo contra repos propios o de confianza (v0.10.0) |
+| G11 / G28 | cerrado | `--image` en run/ask, MIME por firma de bytes; tabla de tools en README (v0.15.0) |
+| G12 | cerrado | `cancel` server-side: `POST /v1beta/interactions/{id}/cancel` (v0.11.0) |
+| G13 | cerrado | `--background` + polling acotado; `continue` no compite con una interacción viva (v0.12.0) |
+| G14 / G27 | doc | "What a task costs", el $0 acotado a Antigravity (v0.10.0) |
+| G15 | cerrado (probado en vivo) | trace con 2 turnos, ambos con contrato y tools; continuidad por `previous_interaction_id` (v0.9.3 + prueba en v0.10.0) |
+| G16 | doc | dos TTLs: sandbox 7d vs interacción 1d/55d (v0.10.0) |
+| G17 | doc | qué queda server-side; `store=false` imposible para una tarea reanudable (v0.10.0) |
+| G18 | cerrado | `get_interaction` + `status --live` (v0.11.0) |
+| G19 | cerrado | 429 → exit 4 con hint y sin reintento ciego (v0.11.0) |
+| G20 | doc | pin del preview, síntoma y fix de una constante (v0.10.0) |
+| G21 | doc | Argon fuera del set managed (v0.10.0) |
+| G22 | cerrado | `--agents-file` → `/.agents/AGENTS.md`; `--mount-file` para el resto (v0.14.0) |
+| G23 | cerrado | skills inline vía `--mount-file` a `/.agents/skills/<name>/SKILL.md` (v0.14.0) |
+| G24 | cerrado | set de tools de `run` definido y documentado (v0.15.0) |
+| G25 | **cerrado: no disponible** | Prueba en vivo: `deep-research-preview-04-2026` devuelve HTTP 429 "Rate limit exceeded for model deep-research-pro-preview (limit: 0 input tokens per minute on Free Tier)". El límite del free tier es literalmente 0, así que el modo nunca puede ejecutarse: implementarlo sería código muerto. Solo un tier pago lo habilita. |
+| G26 / G29 / G30 | cerrado por G25 | Dependen de research (store forzado, preguntas del plan, background); sin research no aplican |
+| T15 (streaming de `run`) | **descartado** | El loop de function-calling no se puede intercalar en un stream one-shot; `--background` cubre el problema real (drop de conexión) |
+| ADR 0001 | pendiente del humano | Decisión standalone vs `agy-model-bridge`; la escribe el usuario (AGENTS.md §9) |
+
+### Si algún día se habilita research (tier pago)
+
+Datos de contrato ya verificados en la doc oficial, para no re-investigar:
+`background=true` es obligatorio; `agent_config.type` es `"deep-research"` (no
+`"antigravity"`, así que `planner.agent_config()` no se reusa tal cual); el REST
+usa el header `Api-Revision: 2026-05-20`; hay dos agentes
+(`deep-research-preview-04-2026` rápido y `deep-research-max-preview-04-2026`
+máximo); el planning colaborativo son tres turnos
+(plan → refinar → aprobar) encadenados con `previous_interaction_id`.
+
+### Límite del upload directo, medido
+
+`POST /v1beta/environments` se llama con body vacío `{}` (el recurso
+`Environment` no tiene campo `type`; eso solo existe en `Source`). El upload
+resumable acepta cualquier `X-Upload-Content-Length` en el init y corta al
+acumular: 1530 MiB pasan, 1536 MiB devuelven 400. `extract` y `overwrite` van
+en el init, nunca en los chunks, y con `extract=true` sobre un target que
+termina en `/` el contenido aterriza directo en ese directorio.

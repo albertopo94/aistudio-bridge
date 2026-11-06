@@ -5,6 +5,50 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.17.0] — 2026-11-06
+
+### Added
+
+- `run --local-repo <path>` delegates a task against a repository that never
+  leaves the machine. The working tree is archived (tracked files plus
+  untracked-but-not-ignored ones, never `.git`), uploaded into a fresh sandbox
+  with a resumable session and unpacked at `/workspace/<name>`, and the result
+  comes back as a branch cloned from that local path. It is the only route for
+  a local-only repository, and the one for a tree over the 500 MB
+  `repository` source limit, up to the measured 1.5 GiB upload ceiling (G4).
+- `UploadClient.upload_file` streams a file chunk by chunk, so a large archive
+  never has to fit in memory.
+- `Sync.archive_repo` builds that archive to a file instead of in memory, for
+  the same reason.
+
+### Fixed
+
+- An upload target ending in `/` keeps its trailing slash. `_quote_path`
+  stripped it, which would have made the service unpack an archive under a
+  directory named after the file instead of into the target directory.
+
+## [0.17.0] — 2026-11-06
+
+### Added
+
+- `run --local-repo <path>` delegates a task against a repository that never
+  leaves the machine. The working tree is archived (tracked files plus
+  untracked-but-not-ignored ones, never `.git`), uploaded into a fresh sandbox
+  with a resumable session and unpacked at `/workspace/<name>`, and the result
+  comes back as a branch cloned from that local path. It is the only route for
+  a local-only repository, and the one for a tree over the 500 MB `repository`
+  source limit, up to the measured 1.5 GiB upload ceiling (G4).
+- `UploadClient.upload_file` streams a file chunk by chunk, so a large archive
+  never has to fit in memory.
+- `archive_repo` builds that archive on disk instead of in memory, for the
+  same reason.
+
+### Fixed
+
+- An upload target ending in `/` keeps its trailing slash. It was being
+  stripped, which would have made the service unpack an archive under a
+  directory named after the file instead of into the target directory.
+
 ## [0.16.0] — 2026-11-06
 
 ### Added

@@ -54,8 +54,8 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T14 | S2 | writer candidate: G13 background + polling + SSE reconnect | feat(background) |
 | T15 | dropped | inline: streaming SSE for `run` (parity with `ask`) | — (see L18) |
 | T16 | S2 | PoC ~15 min: G5 upload ceiling 1.5 GB → decides whether G4 needs GCS. Script ready (`poc/g5_upload_ceiling.sh`); **live run is the user's** (consumes his API quota) | docs(poc) + v0.16.0 |
-| T17 | S2 | depends on T16: G4 resumable upload for repos > 500 MB. `UploadClient` + `tar_gz_bytes` done (v0.16.0); runner wiring waits on the G5 verdict | feat(upload) |
-| T18 | S2 | last, needs a user product decision on cost: G25 research mode (+G26,G29,G30) | feat(research) |
+| T17 | S2 | **DONE inline** (writer unavailable): `run --local-repo` — archive the tree, create the env, upload with `extract=true`, guard at the measured 1.5 GiB | feat(local-repo) v0.17.0 |
+| T18 | S2 | **closed by evidence** — G25 research returns HTTP 429 on the free tier (limit 0 input tokens/min), so it cannot run at all; G26/G29/G30 depend on it | docs(closing) |
 | T19 | closing | docs: mark every gap closed in the plan index; ADR 0001 reminder to the user | docs(closing) |
 | T20 | S8 | inline: G19 — recognise a 429 and explain the no-retry rule (SSE currently loses the HTTP status) | fix(rate-limit) |
 
@@ -196,3 +196,68 @@ the whole backlog, work unit by work unit, on a feature branch.
   (`--data-binary @$BLOB`) — 225 GB of traffic and a meaningless
   measurement; caught before the user ran it, fixed with pre-cut slice
   files plus a total-size sanity check.
+
+- **L21** (evidence, live) T16/G5 **measured**, not estimated. The user
+authorized the run and the parent executed `poc/g5_upload_ceiling.sh` against
+the real API (18m27s, 1.5 GiB): 153 chunks of 10 MB (1530 MiB) were accepted
+and the final 1536 MiB chunk was rejected with HTTP 400 `{"error":{"message":
+"File size exceeds maximum allowed limit.","code":"invalid_request"}}`. The
+init call accepts any declared `X-Upload-Content-Length`, so the limit applies
+on accumulation. **Verdict (b): the direct upload ceiling is ~1.5 GiB.** GCS
+stays documented as the path above that range but is not part of this product
+(no bucket in the profile), so the honest outcome is a readable refusal above
+the measured ceiling instead of a silent failure. Environment deleted on exit,
+which also exercised the G2 DELETE path.
+
+- **L22** (defects found by the dry run, both fixed) Two real bugs in the PoC
+surfaced only because a local fake server was run before spending quota:
+(1) `POST /v1beta/environments` was sent with `{"type":"remote"}` and the API
+rejects it — the `Environment` resource has no top-level `type` (only
+`Source.type` does), so the body must be `{}`; (2) macOS `wc -c < file` pads the
+count with leading spaces, which corrupted `X-Upload-Content-Length` and the
+`Content-Range` denominator (`bytes 0-10485759/ 25165824`). Both were confirmed
+fixed with two 1 MiB live runs (one plain, one `extract=true`) before the 1.5 GiB
+run: create 200, init with `Location`, chunk 200, metadata 200, delete 200.
+
+- **L23** (evidence, decision changed by measurement) T18/G25 **closed, not
+implemented**. The plan carried research mode as a cost decision ("~US$1-3 per
+task, needs an explicit user yes"). A single live probe replaced that estimate
+with a hard blocker: `POST /v1beta/interactions` with
+`agent="deep-research-preview-04-2026"`, `background=true` returns **HTTP 429**
+`{"error":{"message":"Rate limit exceeded for model deep-research-pro-preview
+(limit: 0 input tokens per minute on Free Tier). Please upgrade your tier at
+https://ai.dev/rate-limit.","code":"too_many_requests"}}`. The free-tier limit
+is literally 0 input tokens per minute, so the mode can never execute and
+shipping it would be dead code for this project; only a paid tier enables it.
+G26 (forced store), G29 (planning questions) and G30 (background for research)
+depend on it and close with it. The contract facts needed the day the tier
+changes are recorded in `plan-remote-worker/README.md` (agent_config type
+`deep-research`, mandatory `background`, `Api-Revision: 2026-05-20`, the two
+agent versions, the 3-turn collaborative planning flow) so nobody re-researches
+them.
+
+- **L24** (evidence) T17/G4 delivered inline, v0.16.0 → 0.17.0. The writer was
+launched once and failed with a provider-side "unavailable", so per the no-retry
+rule the unit was done in the parent (same handling as L15). No partial writes
+were left behind: `git status` showed only the two doc files and the suite was
+still 180/180 before the work started. What landed:
+`sync.archive_repo()` (streams the tarball to a file, tracked + untracked-not-
+ignored only, never `.git`), `sync.UPLOAD_LIMIT_BYTES` (1530 MiB, the size the
+G5 run demonstrably took), `EnvironmentsClient.create_environment()`,
+`UploadClient.upload_file()` (chunk-at-a-time reads) and
+`UploadClient(upload/extract)` carrying `extract=true` on the init call only,
+`runner` wiring that creates the sandbox, uploads to `workspace/<name>/` and
+runs the interaction in that environment, plus `cli --local-repo` in a required
+mutually exclusive group with `--repo`. 7 new tests (`tests/test_local_repo.py`),
+suite **187/187**. Two defects found by those tests, both real: (1) `_quote_path`
+stripped the target's trailing slash, which is exactly the signal that makes the
+service unpack into the directory instead of creating one named after the file —
+the upload target now restores it; (2) the first test run reached the *real* API
+(401) because the test runner injected only the interactions client, not the
+environments/uploads ones — the fake now covers all three surfaces and no test
+touches the network.
+
+- **L25** (incident, harness) The writer subagent failed on a provider outage
+("assistant reported an error (unavailable)"), not on the task. Its task carried
+no side effects, so nothing was replayed or relaunched; the unit continued
+inline instead of retrying an unavailable model.
