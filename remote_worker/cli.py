@@ -12,6 +12,7 @@ import sys
 
 from . import planner
 from . import routes
+from .routes import alternatives_line, human_bytes, human_duration, human_rate
 from .google_client import InteractionsError
 
 VERSION_PATH = os.path.join(
@@ -108,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "routes", help="print every way code can reach the sandbox, with "
                        "measured limits, so you can pick one")
+
+    sub.add_parser(
+        "probe", help="upload 1 MiB to a scratch sandbox and report whether "
+                      "this account can upload right now (takes seconds, "
+                      "costs no task quota)")
 
     ask = sub.add_parser("ask", help="delegate a non-code task, get the text")
     ask.add_argument("task", help="the task, in plain language")
@@ -230,6 +236,8 @@ def main(argv=None, *, runner=None) -> int:
             ))
         if args.command == "clean":
             return _report_clean(runner.clean(apply=args.yes))
+        if args.command == "probe":
+            return _report_probe(runner.probe())
         if args.command == "status":
             code = _report_status(runner.status(args.task_id))
             if args.live:
@@ -322,7 +330,7 @@ def _build_runner(parser, args):
     from .config import resolve_api_key
 
     needs_key = getattr(args, "command", None) in ("run", "ask", "continue",
-                                                   "clean")
+                                                   "clean", "probe")
     wants_live = (getattr(args, "command", None) == "status"
                   and getattr(args, "live", False))
     api_key = resolve_api_key() or ""
@@ -493,6 +501,42 @@ def _report_live_status(runner, task_id: str) -> None:
     tokens = (interaction.get("usage") or {}).get("total_tokens")
     if tokens is not None:
         print(f"live tokens: {tokens}")
+
+
+def _report_probe(result: dict) -> int:
+    """Answer the one question `probe` exists for: can this account upload now?
+
+    Exit codes: 0 uploads work, 4 the window is spent (the same code a 429
+    gets, because it is the same kind of answer -- wait, do not fix), 1
+    anything else.
+    """
+    held = (f"sandbox {result.get('environment_id')} is still yours; "
+            "`remote-worker clean --yes` releases it")
+    if result.get("ok"):
+        print(f"upload: ok -- {human_bytes(result['bytes'])} in "
+              f"{human_duration(result['seconds'])} at "
+              f"{human_rate(result['rate'])}")
+        if result.get("released"):
+            print("the scratch sandbox was deleted again")
+        else:
+            print(f"warning: {held}", file=sys.stderr)
+        return 0
+    if result.get("blocked"):
+        print("upload: blocked -- the account's fair use window for uploads "
+              "is spent right now", file=sys.stderr)
+        print("this is not a size problem: the same account takes the same "
+              "bytes after the window resets. Retry later, or use a route "
+              "that does not upload from here: "
+              f"{alternatives_line(exclude='direct-upload')}. "
+              "`remote-worker routes` prints them all.", file=sys.stderr)
+        if not result.get("released"):
+            print(f"warning: {held}", file=sys.stderr)
+        return 4
+    print(f"upload: refused -- the service answered {result.get('status')} "
+          f"{result.get('body')}", file=sys.stderr)
+    if not result.get("released"):
+        print(f"warning: {held}", file=sys.stderr)
+    return 1
 
 
 def _report_clean(result: dict) -> int:

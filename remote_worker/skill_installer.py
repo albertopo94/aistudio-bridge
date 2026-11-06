@@ -115,6 +115,12 @@ MiB/s and that the account has a fair-use window over time: a refusal with
 the repository is too big, and retrying later is the fix. Offer the other
 routes from the table instead of retrying the same one.
 
+Before committing to a long upload, ask the user whether to run
+`remote-worker probe` first: it takes about a second, costs no task quota, and
+tells you whether the window is open right now. Suggest a route; let the user
+choose it. The CLI never asks him anything itself, so this choice is yours to
+put in front of him.
+
 ## Rules
 
 - Always show the user the report (status, tokens, branch/diff, test result).

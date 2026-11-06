@@ -141,6 +141,7 @@ merges the result itself — review the branch, then merge it with your own git.
 | `clean` | List the sandboxes your account still holds (deletes nothing) |
 | `clean --yes` | Delete the ones no unfinished task is using |
 | `routes` | Print every way code can reach the sandbox, with measured limits (offline, no key) |
+| `probe` | Upload 1 MiB to a scratch sandbox and report whether your account can upload right now (~1 s, no task quota) |
 
 ## Models
 
@@ -317,6 +318,24 @@ because this tool can run them: `shards` has never been validated against the
 service and `gcs-source` needs a bucket of your own. Neither is offered as an
 alternative in an error message.
 
+Since the window is only observable by attempting an upload, `remote-worker
+probe` attempts a small one: 1 MiB into a scratch sandbox, which it deletes on
+every exit path, and no interaction is created — it costs bytes, not task
+quota.
+
+Sample output:
+
+```bash
+$ remote-worker probe
+upload: ok -- 1.0 MiB in 1.2s at 0.8 MiB/s
+the scratch sandbox was deleted again
+```
+
+Exit `0` means uploads work right now. Exit `4` means the window is spent and
+says so, which is the same code a rate limit gets because it is the same kind
+of answer: wait, there is nothing to fix. That is the number an agent can
+branch on when it offers you a route.
+
 The service, not your connection, sets the pace: measured 1.1-1.6 MiB/s against
 a machine with a 51.86 Mbps uplink. Splitting an archive into parts does not
 raise the window, it would only make a long upload resumable — which is why it
@@ -390,6 +409,8 @@ and the fix is one constant in `remote_worker/runner.py`.
   retry is not idempotent — it would fork a second branch of the conversation
   and bill the same work twice. Wait, then re-run the printed command. A rate
   limit exits 4; other API failures exit 1.
+- `probe` uses the same codes for the same reason: `0` uploads work now, `4` the
+  upload window is spent, `1` anything else.
 
 ## What a task costs
 

@@ -132,6 +132,29 @@ def format_routes() -> str:
     return "\n".join(lines)
 
 
+def human_bytes(count: float) -> str:
+    """A byte count in the unit a person reads it in."""
+    for unit, size in (("MiB", 1024 ** 2), ("KiB", 1024)):
+        if count >= size:
+            return f"{count / size:.1f} {unit}"
+    return f"{count:.0f} B"
+
+
+def human_rate(bytes_per_second: float) -> str:
+    """A throughput in the unit a person reads it in."""
+    for unit, size in (("MiB", 1024 ** 2), ("kB", 1024)):
+        if bytes_per_second >= size:
+            return f"{bytes_per_second / size:.1f} {unit}/s"
+    return f"{bytes_per_second:.0f} bytes/s"
+
+
+def human_duration(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    if seconds < 60:
+        return f"{seconds}s"
+    return f"{seconds // 60}m{seconds % 60:02d}s"
+
+
 def is_size_limit(status: int, body: str) -> bool:
     """Whether a failed upload is the window being spent, not a broken request."""
     return status == 400 and SIZE_LIMIT_MARKER in body

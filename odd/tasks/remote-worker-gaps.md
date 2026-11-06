@@ -77,7 +77,7 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T20 | S8 | inline: G19 — recognise a 429 and explain the no-retry rule (SSE currently loses the HTTP status) | fix(rate-limit) |
 | T21 | S10,S11 | inline, test-first: route table as a data module + `routes` command + the fair-use 400 mapped to an actionable message; delete the fake 1.5 GiB guard | feat(routes) 98ec5cc + v0.18.0 d03b5ab |
 | T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) + v0.19.0 |
-| T23 | S12 | inline, test-first: `probe` command | feat(probe) |
+| T23 | S12 | inline, test-first: `probe` command | feat(probe) + v0.20.0 |
 | T24 | S11 | **blocked** — live validation of sharded upload before it may be advertised; needs the user's quota OK | — |
 | T25 | S11 | **blocked** — live end-to-end `--local-repo` run + `--delete-env` decision; needs the user's quota OK | — |
 
@@ -350,30 +350,62 @@ discover -s tests`, 65s) sobre `a1dca98` — cierra el punto 5 de L27: el callba
 **L30** (evidence) T21 entregado inline, test-first, v0.18.0. RED observado por la
 razón correcta (`ImportError: cannot import name 'routes'`). Lo que landed:
 `remote_worker/routes.py` (tabla de 5 rutas con `ceiling`/`speed`/`needs`/`status`,
-`format_routes()`, `alternatives_line()`, `is_size_limit()`,
-`upload_failure_message()`), comando `routes` offline en la CLI (no pide key: se lee
-antes de gastar cuota), el 400 "File size exceeds maximum allowed limit" traducido a
-ventana de fair-use con acción (reintentar) y rutas alternativas, y el sandbox de un
-intento fallido se borra antes de levantar el error (si el delete falla, el mensaje lo
-dice y nombra `clean --yes`). Se **borró** `sync.UPLOAD_LIMIT_BYTES` y su guard: el
-número de 1530 MiB era verdadero el día medido y falso esa misma tarde (300 MiB
-rechazado a los 290, 20 MiB aceptado minutos después); el test que lo imponía se borró
-a propósito y `test_the_fake_local_ceiling_is_gone` fija que nadie lo reintroduzca.
-Una sola fuente de verdad: la tabla renderizada vive en `routes.py`, la imprime la CLI,
-el SKILL la embebe y el README también — `test_the_readme_embeds_the_rendered_table` y
-`test_the_skill_embeds_the_rendered_table` rompen si alguna copia se corre.
-12 reglas nuevas en `tests/test_routes.py`; suite **198/198**. Chequeo diferencial
-contra `1b459da` en 9 invocaciones (`--version`, `-v`, `-h`, `run/ask/clean/setup/
-status/continue/cancel -h`): idénticas salvo `-h`, que agrega el subcomando nuevo — lo
-pedido, nada no pedido. `routes` sale con `rc=0` y sin red.
+`format_routes()`, `alternatives_line()`, `is_size_limit()`, `upload_failure_message()`),
+el comando `routes` offline en la CLI (no pide key: se lee antes de gastar cuota), el 400
+"File size exceeds maximum allowed limit" traducido a ventana de fair-use con acción
+(reintentar) y rutas alternativas, y el sandbox de un intento fallido se borra antes de
+levantar el error (si el delete falla, el mensaje lo dice y nombra `clean --yes`). Se
+**borró** `sync.UPLOAD_LIMIT_BYTES` y su guard: el número de 1530 MiB era verdadero el
+día medido y falso esa misma tarde (300 MiB rechazado a los 290, 20 MiB aceptado minutos
+después); el test que lo imponía se borró a propósito y `test_the_fake_local_ceiling_is_gone`
+fija que nadie lo reintroduzca. Una sola fuente de verdad: la tabla renderizada vive en
+`routes.py`, la imprime la CLI, el SKILL la embebe y el README también —
+`test_the_readme_embeds_the_rendered_table` y `test_the_skill_embeds_the_rendered_table`
+rompen si alguna copia se corre. 12 reglas nuevas en `tests/test_routes.py`; suite
+**198/198**. Chequeo diferencial contra `1b459da` en 9 invocaciones (`--version`, `-v`,
+`-h`, `run/ask/clean/setup/status/continue/cancel -h`): idénticas salvo `-h`, que agrega
+el subcomando nuevo — lo pedido, nada no pedido. `routes` sale con `rc=0` y sin red.
 
 **L31** (evidence) T22 entregado inline, test-first. RED: 3 failures por ausencia de
 líneas de progreso en stderr. Lo que landed: `_upload_progress()` en `runner.py`
-devuelve el callback que consume el `on_progress` que ya existía en `UploadClient`
-(commiteado en `a1dca98`, sin consumidor hasta ahora), más `_human_rate` /
-`_human_duration`. Formato: `upload <sent>/<total> bytes at <rate> eta <t>` y línea
-final `... done in <t>`. Tres decisiones con test cada una: el progreso va a **stderr**
-(stdout sigue siendo el reporte, así `> report.txt` sigue sirviendo); la tasa se mide
-de la subida actual, no de un promedio recordado; y nada se informa como enviado que
-el servicio no haya acknowledgear (test con ventana que corta a los 2 chunks). Suite
-**202/202** (`tests/test_upload_progress.py`, 4 reglas).
+devuelve el callback que por fin consume el `on_progress` que ya existía en
+`UploadClient` (commiteado en `a1dca98`, sin consumidor hasta ahora). Formato:
+`upload <sent>/<total> bytes at <rate> eta <t>` y línea final `... done in <t>`.
+Tres decisiones, cada una con su test: el progreso va a **stderr** (stdout sigue
+siendo el reporte, así `> report.txt` sigue sirviendo); la tasa se mide de la subida
+actual, no de un promedio recordado; y ningún byte que el servicio no confirmó aparece
+como enviado (test con una ventana que corta a los 2 chunks). Suite **202/202**
+(`tests/test_upload_progress.py`, 4 reglas). Commit e3b4ca7.
+
+**L32** (evidence) T23 (`probe`) entregado inline, test-first. S12: la ventana de
+fair-use no se puede leer de ningún lado — solo se mide intentando — y intentar con un
+payload real cuesta minutos. 1 MiB a un sandbox desechable contesta lo mismo en un
+segundo.
+
+RED observado: la primera corrida dio 4 errores. Dos causas, y hay que nombrar las dos:
+una era mía y no del producto — mi fake server contestaba `200` a un chunk no final,
+cuando el protocolo pide `308`, así que el cliente lanzaba `UploadResumeError` antes de
+llegar a lo que quería probar —; la otra era un defecto real de mi implementación: el
+`finally` escribía sobre un `outcome` que aún no existía cuando el environment fallaba
+(`UnboundLocalError`), o sea la ruta de limpieza no estaba cubierta. Corregido el fake
+(habla el protocolo: `308` + `Range` hasta el último chunk) e inicializado `outcome`
+antes del `try`, las 6 pasaron sin tocar ninguna aserción.
+
+Lo que landed: `TaskRunner.probe()` crea el environment, sube `PROBE_BYTES` (1 MiB) a
+`PROBE_TARGET` y **borra el sandbox en todo camino de salida** (incluido el 400 y un
+client roto) desde el `finally`; no crea interacción alguna — gastar cuota de
+interacción para preguntar por bytes es la factura equivocada. El CLI imprime una línea
+con bytes, tiempo y tasa, y sale `0` (sube) / `4` (ventana agotada: el mismo código del
+429 porque es la misma clase de respuesta — esperar, no arreglar) / `1` (lo demás). Si
+el sandbox no se pudo borrar, el mensaje lo dice y nombra `clean --yes`.
+
+Las 6 reglas de `tests/test_probe.py`, cada una con su evidencia: funciona → ok con tasa
+y DELETE del environment; ventana agotada → rc 4 y la palabra "fair use"; **cero**
+llamadas a `/v1beta/interactions`; bytes subidos ≤ 2 MiB; delete rechazado → avisa;
+`probe` no pide argumentos. Formateo humano (`human_bytes`/`human_rate`/
+`human_duration`) vive en `routes.py` para que el progreso y el probe hablen igual.
+Suite **208/208**. Chequeo diferencial contra `1b459da` en 12 invocaciones: `run/ask/
+clean/setup/status/continue/cancel -h` y `status nope` idénticas; difieren `-h` (agrega
+`routes` y `probe`), `--version`/`-v` (0.17.0 → 0.19.0, del bump ya commiteado) y
+`status` sin argumento, que lee el estado local del usuario — no una diferencia de
+código. Ninguna diferencia no pedida.

@@ -23,7 +23,8 @@ from .google_client import (EnvironmentsClient, FilesClient,
                             InteractionsTimeoutError, UploadClient, UploadError)
 from .planner import (agent_config, network_config, task_parts,
                       worker_contract)
-from .routes import upload_failure_message
+from .routes import (human_duration, human_rate, is_size_limit,
+                     upload_failure_message)
 from .state import DEFAULT_ROOT, TaskStore, _slug
 from .sync import (apply_to_branch, archive_repo, inline_source, mount_repo,
                    run_tests, INLINE_TOTAL_LIMIT_BYTES)
@@ -32,20 +33,13 @@ AGENT = "antigravity-preview-09-2026"
 DEFAULT_TEST_COMMAND = ["python3", "tests/test_main.py"]
 AGENTS_TARGET = "/.agents/AGENTS.md"
 
-
-def _human_rate(bytes_per_second: float) -> str:
-    """A throughput in the unit a person reads it in."""
-    for unit, size in (("MiB", 1024 ** 2), ("kB", 1024)):
-        if bytes_per_second >= size:
-            return f"{bytes_per_second / size:.1f} {unit}/s"
-    return f"{bytes_per_second:.0f} bytes/s"
-
-
-def _human_duration(seconds: float) -> str:
-    seconds = max(0, int(round(seconds)))
-    if seconds < 60:
-        return f"{seconds}s"
-    return f"{seconds // 60}m{seconds % 60:02d}s"
+#: What :meth:`TaskRunner.probe` uploads: small enough to cost about a second
+#: at the service's own rate, big enough that a zero-byte fluke cannot pass
+#: for a working window.
+PROBE_BYTES = 1024 * 1024
+#: A name no real task file would take, so the probe cannot collide with a
+#: mounted repository in a reused sandbox.
+PROBE_TARGET = "workspace/.remote-worker-probe.bin"
 
 
 def _upload_progress():
@@ -66,13 +60,13 @@ def _upload_progress():
     def report(sent: int, total: int) -> None:
         elapsed = time.monotonic() - started
         rate = sent / elapsed if (elapsed > 0 and sent) else 0.0
-        head = f"upload {sent}/{total} bytes at {_human_rate(rate)}"
+        head = f"upload {sent}/{total} bytes at {human_rate(rate)}"
         if sent >= total or rate <= 0:
-            print(f"{head} done in {_human_duration(elapsed)}",
+            print(f"{head} done in {human_duration(elapsed)}",
                   file=sys.stderr, flush=True)
         else:
             eta = (total - sent) / rate
-            print(f"{head} eta {_human_duration(eta)}",
+            print(f"{head} eta {human_duration(eta)}",
                   file=sys.stderr, flush=True)
 
     return report
@@ -543,6 +537,46 @@ class TaskRunner:
 
     # Statuses after which an environment is certainly no longer needed.
     FINISHED_STATUSES = ("completed", "canceled", "expired", "failed")
+
+    def probe(self) -> dict:
+        """Answer whether this account can upload right now (S12).
+
+        The fair-use window is not readable from anywhere: the only honest
+        test of it is an upload, and the honest size for a real task is far too
+        expensive to spend on a question. One MiB into a scratch sandbox costs
+        about a second at the rate the service imposes and returns the same
+        answer, so a user (or his agent) can choose a route on a fact from a
+        minute ago instead of on an average.
+
+        No interaction is created: this measures bytes, and spending
+        interaction quota to ask about bytes would be the wrong bill.
+        """
+        environment_id = None
+        try:
+            environment = self.environments.create_environment()
+            environment_id = environment.get("id")
+            if not environment_id:
+                raise ValueError("the service did not return an environment id")
+            started = time.monotonic()
+            self.uploads.upload(
+                environment_id=environment_id,
+                path=PROBE_TARGET,
+                data=b"\0" * PROBE_BYTES,
+            )
+            seconds = time.monotonic() - started
+            outcome = {"ok": True, "bytes": PROBE_BYTES, "seconds": seconds,
+                       "rate": PROBE_BYTES / seconds if seconds else 0.0}
+        except UploadError as exc:
+            outcome = {"ok": False, "blocked": is_size_limit(exc.status, exc.body),
+                       "status": exc.status, "body": exc.body}
+        finally:
+            # Every exit path lands here, including the refused upload and a
+            # broken client: a probe that left sandboxes behind would itself
+            # become the thing that fills the account.
+            if environment_id:
+                outcome["environment_id"] = environment_id
+                outcome["released"] = self._release_environment(environment_id)
+        return outcome
 
     def clean(self, *, apply: bool = False) -> dict:
         """List (and optionally delete) sandboxes this account still holds.
