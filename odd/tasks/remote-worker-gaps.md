@@ -72,3 +72,11 @@ the whole backlog, work unit by work unit, on a feature branch.
 - **L5** Context fact: `ask` is not idempotent with the memory tools — a prompt that forces a
   `memory_search` call creates a `requires_action` round trip, so the *next* turn is exactly
   the continuation G15 broke. That is the shape of the T1 probe.
+
+- **L6** (evidence) Slice 1 on `feat/gaps-backlog` (3 commits, 376 authored changed
+  lines): ee12efb docs(odd) feature spec; bf058d3 feat(client) request trace
+  (`REMOTE_WORKER_TRACE`); 4654df7 feat(cli) `-v` alias + README delegation
+  (Q1-Q3). 95/95 tests green. Q1-Q3 verified by acceptance (README no longer
+  references `worker-poc-toy`; sample output labelled; prompts name trigger+mode).
+- **L7** (blocker, outside this list): T1 (live G15 smoke) needs the user's API
+  quota. Command given in conversation. Until it runs, T3+ continue on the branch.
