@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.14.0] — 2026-11-06
+
+### Added
+
+- `run --reuse-env <environment_id>` runs the task in a sandbox you already
+  hold, so dependencies an earlier task installed are still there. The
+  repository is still mounted into it (G7).
+- `run --agents-file <path>` sends a local AGENTS.md to `/.agents/AGENTS.md`,
+  the location the service auto-loads as system instructions. A repository's
+  own AGENTS.md lands at `/workspace/<name>/AGENTS.md`, which is not such a
+  place, so until now it was read only because the worker contract asks the
+  agent to (G22).
+- `run --mount-file <local>:<target>` (repeatable) places any local text file
+  inside the sandbox, which is how `.agents/skills/<name>/SKILL.md` — the
+  documented skill channel — finally reaches the agent (G23). Inline files are
+  checked against the service's ceilings (1 MB each, 2 MB total, text only)
+  before anything is sent.
+
 ## [0.13.0] — 2026-11-06
 
 ### Added
