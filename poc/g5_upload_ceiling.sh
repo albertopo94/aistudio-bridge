@@ -34,7 +34,7 @@ echo "target bytes: $SIZE  chunk: $CHUNK  base: $BASE_URL"
 echo "-- create environment"
 ENV_BODY=$(curl -sS -X POST "$BASE_URL/v1beta/environments" \
   -H "x-goog-api-key: $GEMINI_API_KEY" -H "Content-Type: application/json" \
-  -d '{"type":"remote","sources":[]}')
+  -d '{}')
 ENV_ID=$(printf '%s' "$ENV_BODY" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))')
 echo "environment_id=$ENV_ID"
 [ -n "$ENV_ID" ] || { echo "no environment id from create:"; echo "$ENV_BODY"; exit 3; }

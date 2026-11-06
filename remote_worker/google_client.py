@@ -332,8 +332,9 @@ class UploadClient:
     def upload(self, *, environment_id: str, path: str, data: bytes) -> dict:
         """Upload ``data`` into the environment at ``path``.
 
-        Returns the parsed final response (file metadata, or {} when the
-        service answers with an empty body as the docs show for the init).
+        Returns the parsed final response (file metadata, or the file list
+        when the service extracts the archive, or {} when it answers with an
+        empty body).
         """
         if not environment_id:
             raise ValueError("environment_id is required")
@@ -424,9 +425,13 @@ class UploadClient:
         return end if end >= 0 else None
 
     def _final_read(self, session: str) -> dict:
+        """Parse the final reply: a metadata dict, or the file list the
+        service returns for an extracted upload."""
         body = getattr(self, "_final_body", b"")
         text = body.decode("utf-8").strip()
-        return json.loads(text) if text else {}
+        if not text:
+            return {}
+        return json.loads(text)
 
 
 class UploadError(RuntimeError):
