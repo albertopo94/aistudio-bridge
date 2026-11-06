@@ -330,7 +330,7 @@ class UploadClient:
         self._chunk_size = chunk_size
 
     def upload(self, *, environment_id: str, path: str, data: bytes,
-               extract: bool = False) -> dict:
+               extract: bool = False, on_progress=None) -> dict:
         """Upload ``data`` into the environment at ``path``.
 
         ``extract=True`` tells the service to unpack a tar archive into the
@@ -348,11 +348,11 @@ class UploadClient:
             raise ValueError("path is required")
         return self._run_upload(
             environment_id, path, len(data), extract,
-            lambda start, end: data[start:end + 1],
+            lambda start, end: data[start:end + 1], on_progress,
         )
 
     def upload_file(self, *, environment_id: str, path: str, file_path: str,
-                    extract: bool = False) -> dict:
+                    extract: bool = False, on_progress=None) -> dict:
         """Upload a file from disk, one chunk at a time.
 
         ``upload`` takes the whole payload as bytes, which is right for a small
@@ -372,12 +372,13 @@ class UploadClient:
             def read(start: int, end: int) -> bytes:
                 handle.seek(start)
                 return handle.read(end - start + 1)
-            return self._run_upload(environment_id, path, total, extract, read)
+            return self._run_upload(environment_id, path, total, extract, read,
+                                    on_progress)
 
     def _run_upload(self, environment_id: str, path: str, total: int,
-                    extract: bool, read) -> dict:
+                    extract: bool, read, on_progress=None) -> dict:
         session = self._init_session(environment_id, path, total, extract)
-        self._put_chunks(session, read, total)
+        self._put_chunks(session, read, total, on_progress)
         return self._final_read(session)
 
     def _init_session(self, environment_id: str, path: str,
@@ -417,7 +418,8 @@ class UploadClient:
             )
         return location
 
-    def _put_chunks(self, session: str, read, total: int) -> None:
+    def _put_chunks(self, session: str, read, total: int,
+                    on_progress=None) -> None:
         start = 0
         end = min(self._chunk_size, total) - 1
         while True:
@@ -434,6 +436,8 @@ class UploadClient:
                                             timeout=self._timeout) as resp:
                     if end == total - 1:
                         self._final_body = resp.read()
+                        if on_progress:
+                            on_progress(total, total)
                         return
                     # A 200/201 here on a non-final chunk would be unusual;
                     # the docs say every non-final chunk answers 308.
@@ -452,6 +456,8 @@ class UploadClient:
                         ) from exc
                     start = last + 1
                     end = min(start + self._chunk_size, total) - 1
+                    if on_progress:
+                        on_progress(start, total)
                     if start > end:
                         raise UploadResumeError(
                             f"server committed byte {last} but only {total} "
