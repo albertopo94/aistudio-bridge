@@ -261,3 +261,45 @@ touches the network.
 ("assistant reported an error (unavailable)"), not on the task. Its task carried
 no side effects, so nothing was replayed or relaunched; the unit continued
 inline instead of retrying an unavailable model.
+
+## Post-cierre: próxima idea (discutida, sin implementar)
+
+**L26** (user, verbatim, 2026-11-06): "dejar todas las posibilidades de
+subidas implementadas o documentadas ya sea en codigo o en skill y que el
+agente le diga al usuario las que hay disponible y que el usuario escoja
+con un enter [...] ya no es solo la velocidad lo que se puede evaluar,
+tambien entra en juego la cantidad que google deja subir si considera que
+se esta abusando o no, asi que puede que segun el momento y la infra
+estructura del usuario se pueda usar una u otra, asi que nosotros
+implementemos y probemos todas para saber los limites y requisitos de cada
+via y que el usuario seleccione mas alla de lo que el agente/llm le pueda
+sugerir."
+
+**L27** (decision, diseño acordado — implementación en otra sesión):
+selector de rutas de subida.
+1. Tabla de rutas como **una sola fuente de datos**, leída por dos lados:
+   el CLI la usa en los mensajes de error (un 400 fair-use →
+   "ventana agotada; alternativas: --repo / GCS / reintentar mañana") y
+   el SKILL lleva la misma tabla para que el agente local del usuario
+   muestre el menú. La CLI sigue **no interactiva** (regla de producto);
+   la selección con Enter vive en la capa del agente, donde está el
+   humano. El LLM sugiere, el usuario elige.
+2. Dos capas: **pre-flight** (gratis: tamaño estimado del tarball, host
+   git alcanzable, bucket GCS configurado o no — filtra el menú a lo que
+   es real) y **runtime** (el fair-use solo se mide intentando: comando
+   `probe` de 1 MiB a un environment deschedable que diga "ahora se puede
+   subir / bloqueado hasta que se resetee").
+3. Rutas y números medidos a 2026-11-06: `--repo` (500 MB documentado,
+   clon server-side) / `--local-repo` directa (ventana fair-use de la
+   cuenta, no 1.5 GiB; ~1.1–1.6 MiB/s impuestos por el servicio; 500 MB ≈
+   6 min) / shards (solo stdlib, **mismo** fair-use, no documentado por
+   Google → validar en vivo antes de publicarlo) / GCS (requiere bucket
+   del usuario, 2 GB documentado, ~5 min para 1.5 GB a 51 Mbps, la vía
+   que se aleja del fair-use porque el transporte es distinto) / inline
+   (1 MB por archivo, 2 MB total).
+4. Orden de implementación acordado: (a) reemplazar el guard falso
+   `UPLOAD_LIMIT_BYTES` por mapeo amigable del 400; (b) tabla como
+   módulo de datos; (c) `probe`; (d) validar shards en vivo; (e) GCS solo
+   cuando el usuario quiera meterle bucket.
+5. Pendiente técnica: `on_progress` agregado al `UploadClient` tras
+   0022faa; suite completa por correr antes del próximo commit.
