@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.15.0] — 2026-11-06
+
+### Added
+
+- `run --image <path>` and `ask --image <path>` (repeatable) attach a png,
+  jpeg, gif or webp to the task. The mime type is read from the bytes, not
+  the filename. Audio, video and documents are refused before anything is
+  sent (G11, G28).
+
+### Changed
+
+- README documents that `tools` replaces the service defaults (not adds to
+  them), with the exact table of what `run` and `ask` each carry (G24).
+
 ## [0.14.0] — 2026-11-06
 
 ### Added
