@@ -11,6 +11,7 @@ import os
 import sys
 
 from . import planner
+from .google_client import InteractionsError
 
 VERSION_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "VERSION"
@@ -53,6 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = sub.add_parser("status", help="show one task or all of them")
     status.add_argument("task_id", nargs="?")
+    status.add_argument("--live", action="store_true",
+                        help="also ask the service for the live status of one "
+                             "task (needs an API key)")
 
     cont = sub.add_parser("continue", help="resume a task that hit its budget")
     cont.add_argument("task_id")
@@ -125,7 +129,12 @@ def main(argv=None, *, runner=None) -> int:
                 budget=budget, branch=args.branch,
             ))
         if args.command == "status":
-            return _report_status(runner.status(args.task_id))
+            code = _report_status(runner.status(args.task_id))
+            if args.live:
+                if not args.task_id:
+                    parser.error("--live needs a task id")
+                _report_live_status(runner, args.task_id)
+            return code
         if args.command == "continue":
             if args.budget is not None:
                 _check_model(parser, planner.DEFAULT_MODEL, args.budget)
@@ -160,7 +169,14 @@ def main(argv=None, *, runner=None) -> int:
             return 0
         if args.command == "cancel":
             task = runner.cancel(args.task_id)
-            print(f"canceled: {task['task_id']} (local tracking only)")
+            if task.get("remote_canceled"):
+                print(f"canceled: {task['task_id']} "
+                      "(stopped through the service)")
+            else:
+                print(f"canceled: {task['task_id']} (local tracking only)")
+                if task.get("remote_error"):
+                    print("the service refused the cancel; the interaction "
+                          "may still run and spend quota")
             return 0
     except KeyError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -168,6 +184,8 @@ def main(argv=None, *, runner=None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except InteractionsError as exc:
+        return _report_api_error(exc)
 
     parser.print_help()
     return 0
@@ -202,8 +220,10 @@ def _build_runner(parser, args):
     from .config import resolve_api_key
 
     needs_key = getattr(args, "command", None) in ("run", "ask", "continue")
+    wants_live = (getattr(args, "command", None) == "status"
+                  and getattr(args, "live", False))
     api_key = resolve_api_key() or ""
-    if needs_key and not api_key:
+    if (needs_key or wants_live) and not api_key:
         parser.error(
             "no API key found: set GEMINI_API_KEY or run "
             "'remote-worker setup' once"
@@ -283,6 +303,49 @@ def _report_ask(result: dict) -> int:
     print()
     print(result.get("text", ""))
     return 0
+
+
+def _report_api_error(exc) -> int:
+    """Turn an API error into advice, never into a traceback (G19).
+
+    A 429 gets the one thing the raw body does not say: this is a quota
+    window, so waiting is the fix, and re-running blindly is the wrong reflex
+    -- a continuation carries previous_interaction_id, so an automatic retry
+    would fork the conversation and bill the same work twice. That is why the
+    client never retries on its own.
+    """
+    print(f"error: {exc}", file=sys.stderr)
+    if exc.status == 429:
+        print(
+            "rate limit: the free tier quota for this project is spent for "
+            "now. Wait for the window to reset and run the command again.",
+            file=sys.stderr,
+        )
+        print(
+            "this tool never retries on its own on purpose: a continuation "
+            "carries previous_interaction_id, so an automatic retry is not "
+            "idempotent -- it forks the conversation and bills the work twice.",
+            file=sys.stderr,
+        )
+        return 4
+    return 1
+
+
+def _report_live_status(runner, task_id: str) -> None:
+    """Print what the service says about a recorded task (G18)."""
+    try:
+        live = runner.live_status(task_id)
+    except InteractionsError as exc:
+        _report_api_error(exc)
+        return
+    if live["error"]:
+        print(f"live status: unavailable -- {live['error']}")
+        return
+    interaction = live["interaction"]
+    print(f"live status: {interaction.get('status')}")
+    tokens = (interaction.get("usage") or {}).get("total_tokens")
+    if tokens is not None:
+        print(f"live tokens: {tokens}")
 
 
 def _report_status(payload) -> int:

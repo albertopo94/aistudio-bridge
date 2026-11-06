@@ -127,8 +127,9 @@ merges the result itself — review the branch, then merge it with your own git.
 | `ask "<task>"` | Delegate a NON-code task, get the text back (no repo mounted) |
 | `ask "<task>" --stream` | Same, but print the worker's text live as it is generated |
 | `status [task_id]` | List tasks, or show one (works offline, no key needed) |
+| `status <task_id> --live` | Also ask the service for the task's current status (needs a key) |
 | `continue <task_id>` | Resume a task that reached its budget |
-| `cancel <task_id>` | Stop tracking a task locally |
+| `cancel <task_id>` | Stop tracking a task locally, and ask the service to stop it too |
 
 ## Models
 
@@ -220,7 +221,8 @@ and the fix is one constant in `remote_worker/runner.py`.
 - A rate limit exits with the API's own message and **never retries**. That is
   deliberate: a continuation carries `previous_interaction_id`, so a blind
   retry is not idempotent — it would fork a second branch of the conversation
-  and bill the same work twice. Wait, then re-run the printed command.
+  and bill the same work twice. Wait, then re-run the printed command. A rate
+  limit exits 4; other API failures exit 1.
 
 ## What a task costs
 
