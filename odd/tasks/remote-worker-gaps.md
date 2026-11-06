@@ -102,3 +102,14 @@ the whole backlog, work unit by work unit, on a feature branch.
   (multimodal shape noted for G11), G10 (rule in README Security: delegate only
   against repos you own or trust). Version 0.9.3 -> 0.10.0 (MINOR: the trace and `-v`
   are new public surface). 95/95 tests green; README anchors and tables validated.
+
+- **L11** (evidence) T4 G9 done test-first, v0.10.1. RED observed for the right
+  reason: `InteractionsError: Interactions API error 404` escaping `continue_task`
+  in 3 tests. GREEN: 4 new rules in tests/test_expired_task.py (friendly `expired`
+  status, TTL named, budget echoed only when recorded, task marked non-resumable,
+  exactly one attempt, non-404 still raised, CLI exit 3 with no useless `continue`
+  advice). Suite 99/99. Differential check on the 4 sibling offline commands
+  (status, status <id>, --version, -h): identical stdout/stderr/exit vs base.
+  Process note: a sloppy edit briefly orphaned code at the end of `continue_task`
+  and dropped `def status`; caught by `py_compile` + a `grep -n "def "` of the
+  class, restored in the same slice before commit.

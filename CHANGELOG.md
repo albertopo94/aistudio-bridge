@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.10.1] — 2026-11-06
+
+### Fixed
+
+- `continue` against an expired sandbox reports it plainly instead of the raw
+  API error. A 404 while resuming now returns status `expired` with a message
+  naming the 7-day sandbox TTL, echoing the task's own token budget when the
+  record has one, and stating that the task cannot be resumed. The task is
+  marked `expired` in state, so `status` no longer offers it as resumable and
+  the CLI no longer prints a `continue` command that could never work. A
+  non-404 API error still propagates, because a server hiccup is not an
+  expiry, and the task keeps its resumable status. One attempt: a 404 is
+  terminal, so nothing is retried (G9, with the clock distinction from G16).
+
 ## [0.10.0] — 2026-11-06
 
 ### Added
