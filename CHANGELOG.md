@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.20.0] — 2026-11-06
+
+### Added
+
+- `probe` answers whether the account can upload right now: 1 MiB into a
+  scratch sandbox, which is deleted on every exit path including a refusal, and
+  no interaction is created, so the answer costs bytes and not task quota. Exit
+  `0` uploads work, exit `4` the fair-use window is spent — the same code a
+  rate limit gets, because it is the same kind of answer — exit `1` anything
+  else. The window cannot be read from anywhere, only attempted, and this is
+  the cheap way to attempt it: a fact from one minute ago instead of an
+  average, which is what choosing a route actually needs.
+- When a sandbox survives a failed upload or probe, the message says so and
+  names `clean --yes`, instead of letting it hold the account unnoticed.
+
 ## [0.19.0] — 2026-11-06
 
 ### Added
