@@ -41,6 +41,60 @@ def agent_config(model: str | None = None,
     }
 
 
+def network_config(allow_domains=None, no_network=False):
+    """Build the ``environment.network`` object, or None for "leave it alone".
+
+    By default the sandbox reaches any host. That is the fence for tasks that
+    should not: an allowlist of domains, or no egress at all.
+
+    The service matches domains, not URL patterns, and ``*.example.com`` does
+    NOT match ``example.com`` itself, so a wildcard entry without its bare
+    companion is reported rather than left to surprise the user later.
+    """
+    if no_network:
+        if allow_domains:
+            raise ValueError(
+                "--no-network and --allow-domain cannot be combined: the "
+                "first closes egress, the second opens a hole in it"
+            )
+        return {"allowlist": "disabled"}
+    if not allow_domains:
+        return None
+    rules, seen = [], set()
+    for raw in allow_domains:
+        domain = (raw or "").strip()
+        if not domain:
+            raise ValueError("an allowed domain cannot be empty")
+        if any(ch.isspace() for ch in domain):
+            raise ValueError(f"a domain cannot contain spaces: {raw!r}")
+        if "/" in domain or domain.startswith("http:") or domain.startswith(
+                "https:"):
+            raise ValueError(
+                f"expected a bare hostname, not a URL: {raw!r} "
+                "(the allowlist matches domains, not paths)"
+            )
+        if domain in seen:
+            continue
+        seen.add(domain)
+        rules.append({"domain": domain})
+    if not rules:
+        return None
+    return {"allowlist": rules}
+
+
+def wildcard_gaps(allow_domains):
+    """Wildcards the user probably meant to pair with their root domain.
+
+    ``*.example.com`` does not match ``example.com``, so an allowlist holding
+    only the wildcard silently blocks the host people expect. Reported as
+    advice by the CLI, never decided for the user: adding the root may be
+    exactly what they meant to exclude.
+    """
+    listed = {(d or "").strip() for d in (allow_domains or [])}
+    return sorted(d[2:] for d in listed
+                  if d.startswith("*.") and d[2:] not in listed)
+
+
 def worker_contract(*, project: str, repo_dir: str,
                     memory_tools: bool = True) -> str:
     """The worker's ``system_instruction``: role, memory rule, report format."""

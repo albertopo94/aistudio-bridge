@@ -16,9 +16,10 @@ from urllib.parse import urlsplit
 from .engram_adapter import EngramMemory, MemoryDispatcher
 from .function_loop import (RUNNING_STATUSES, WatchLimitExceeded,
                             run_until_complete, wait_until_done)
-from .google_client import (FilesClient, InteractionsClient,
-                            InteractionsError, InteractionsTimeoutError)
-from .planner import agent_config, worker_contract
+from .google_client import (EnvironmentsClient, FilesClient,
+                            InteractionsClient, InteractionsError,
+                            InteractionsTimeoutError)
+from .planner import agent_config, network_config, worker_contract
 from .state import DEFAULT_ROOT, TaskStore, _slug
 from .sync import apply_to_branch, mount_repo, run_tests
 
@@ -50,7 +51,8 @@ class TaskRunner:
     """Runs a delegated task and brings the result back."""
 
     def __init__(self, *, project: str, api_key: str,
-                 client=None, files=None, dispatcher=None, store=None,
+                 client=None, files=None, environments=None,
+                 dispatcher=None, store=None,
                  workdir: str | None = None,
                  memory_enabled: bool = True,
                  poll_interval: float = 5.0, max_polls: int = 360):
@@ -60,6 +62,7 @@ class TaskRunner:
         self._api_key = api_key
         self._client = client
         self._files = files
+        self._environments = environments
         self.store = store or TaskStore(project=project)
         # Stable across sessions so a recorded task can be resumed later;
         # the process temp directory would not survive a restart.
@@ -87,11 +90,20 @@ class TaskRunner:
             self._files = FilesClient(api_key=self._api_key)
         return self._files
 
+    @property
+    def environments(self):
+        if self._environments is None:
+            self._environments = EnvironmentsClient(api_key=self._api_key)
+        return self._environments
+
     def run(self, *, task: str, repo_url: str, model: str | None = None,
             budget: int | None = None,
             branch: str | None = None,
-            background: bool = False) -> dict:
+            background: bool = False,
+            allow_domains=None, no_network: bool = False) -> dict:
         config = agent_config(model=model, budget=budget)
+        network = network_config(allow_domains=allow_domains,
+                                 no_network=no_network)
         repo_name = _repo_name(repo_url)
         repo_dir = f"/workspace/{repo_name}"
         task_id = f"t_{int(time.time())}"
@@ -105,13 +117,18 @@ class TaskRunner:
             memory_tools=self.memory_enabled,
         )
 
+        environment = {
+            "type": "remote",
+            "sources": [mount_repo(repo_url, repo_dir)],
+        }
+        if network:
+            # The fence is declared once here; every later turn rejoins this
+            # environment by id, so it holds for the whole task.
+            environment["network"] = network
         interaction = self.client.create_interaction(
             agent=AGENT,
             input=task,
-            environment={
-                "type": "remote",
-                "sources": [mount_repo(repo_url, repo_dir)],
-            },
+            environment=environment,
             agent_config=config,
             system_instruction=contract,
             tools=tools,
@@ -343,6 +360,61 @@ class TaskRunner:
             "branch": record.get("branch"),
             "report": self.client.last_model_output(final),
         }
+
+    # Statuses after which an environment is certainly no longer needed.
+    FINISHED_STATUSES = ("completed", "canceled", "expired", "failed")
+
+    def clean(self, *, apply: bool = False) -> dict:
+        """List (and optionally delete) sandboxes this account still holds.
+
+        Nothing else ever removes an environment: a finished task leaves its
+        sandbox -- and the repository mounted inside it -- alive for the rest
+        of the 7-day TTL. Deletion is irreversible and the service has no
+        per-project scope (these are the project's environments on the API
+        side, not this tool's), so the default is a dry run and work that is
+        not finished is never touched.
+        """
+        ids, token = [], None
+        # Bounded: a service that kept handing back the same token must not
+        # turn a cleanup listing into an endless loop.
+        for _page in range(20):
+            page = self.environments.list_environments(page_token=token)
+            ids.extend(env.get("id") for env in page.get("environments") or []
+                       if env.get("id"))
+            token = page.get("next_page_token")
+            if not token:
+                break
+        else:
+            raise ValueError(
+                "too many pages of environments to list; clean up in "
+                "smaller scopes"
+            )
+
+        in_use = {
+            task.get("environment_id")
+            for task in self.store.list()
+            if task.get("environment_id")
+            and task.get("status") not in self.FINISHED_STATUSES
+        }
+        kept = [i for i in ids if i in in_use]
+        candidates = [i for i in ids if i not in in_use]
+        if not apply:
+            return {"applied": False, "deleted": [], "failed": [],
+                    "kept_active": kept, "candidates": candidates}
+
+        deleted, failed = [], []
+        for environment_id in candidates:
+            try:
+                self.environments.delete_environment(environment_id)
+                deleted.append(environment_id)
+            except InteractionsError as exc:
+                # Stop on the first refusal: a 403 here usually means
+                # something systemic, and continuing would only produce noise.
+                failed.append({"environment_id": environment_id,
+                               "error": str(exc)})
+                break
+        return {"applied": True, "deleted": deleted, "failed": failed,
+                "kept_active": kept, "candidates": candidates}
 
     def status(self, task_id: str | None = None):
         if task_id is None:

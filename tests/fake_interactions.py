@@ -20,6 +20,7 @@ class FakeInteractionsServer:
         self.replies = []  # optional queue of (status, body); consumed per request
         self.reply_bytes = b""  # what GET returns
         self.get_replies = []  # optional queue of (status, bytes) for GETs
+        self.delete_replies = []  # optional queue of (status, bytes) for DELETEs
         self.reply_delay = 0.0  # seconds; used to force client timeouts
         self.sse_events = None  # optional list of dicts -> SSE stream (alt=sse)
         self._server = None
@@ -45,6 +46,23 @@ class FakeInteractionsServer:
                     status, payload = outer.reply_status, outer.reply_bytes
                 self.send_response(status)
                 self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def do_DELETE(self):
+                outer.requests.append({
+                    "method": "DELETE",
+                    "path": self.path,
+                    "headers": {k.lower(): v for k, v in self.headers.items()},
+                    "body": "",
+                })
+                if outer.delete_replies:
+                    status, payload = outer.delete_replies.pop(0)
+                else:
+                    status, payload = outer.reply_status, outer.reply_bytes
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)

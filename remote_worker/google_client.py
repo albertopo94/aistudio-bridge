@@ -303,6 +303,64 @@ class InteractionsClient:
         return dict(interaction.get("usage", {}))
 
 
+class EnvironmentsClient:
+    """Client for the Environments API: list, read and delete environments.
+
+    A sandbox keeps the mounted repository for its whole life (up to 7 days),
+    and nothing in the product ever removed one. These three calls make
+    cleanup possible (G2).
+    """
+
+    def __init__(self, api_key: str, base_url: str = DEFAULT_BASE_URL,
+                 timeout: float = 120.0):
+        if not api_key:
+            raise ValueError("api_key is required")
+        self._api_key = api_key
+        self._base_url = base_url.rstrip("/")
+        self._timeout = timeout
+
+    def list_environments(self, page_token: str | None = None,
+                         page_size: int | None = None) -> dict:
+        """One page of environments (default 50, the service caps at 1000)."""
+        params = []
+        if page_size is not None:
+            params.append(f"page_size={int(page_size)}")
+        if page_token:
+            params.append(
+                "page_token=" + urllib.parse.quote(page_token, safe="")
+            )
+        url = self._base_url + "/v1beta/environments"
+        if params:
+            url += "?" + "&".join(params)
+        _trace_request("GET", url, None)
+        raw = _send("GET", url, self._api_key, self._timeout)
+        return json.loads(raw.decode("utf-8"))
+
+    def get_environment(self, environment_id: str) -> dict:
+        url = self._env_url(environment_id)
+        _trace_request("GET", url, None)
+        raw = _send("GET", url, self._api_key, self._timeout)
+        return json.loads(raw.decode("utf-8"))
+
+    def delete_environment(self, environment_id: str) -> dict:
+        """Delete one environment now instead of waiting out its TTL.
+
+        The service documents no response body for this call, so an empty one
+        is not an error.
+        """
+        url = self._env_url(environment_id)
+        _trace_request("DELETE", url, None)
+        raw = _send("DELETE", url, self._api_key, self._timeout)
+        text = raw.decode("utf-8").strip()
+        return json.loads(text) if text else {}
+
+    def _env_url(self, environment_id: str) -> str:
+        if not environment_id:
+            raise ValueError("environment_id is required")
+        return (f"{self._base_url}/v1beta/environments/"
+                f"{urllib.parse.quote(environment_id, safe='')}")
+
+
 class FilesClient:
     """Read-side client for the Environments files endpoints."""
 

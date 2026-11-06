@@ -132,6 +132,8 @@ merges the result itself — review the branch, then merge it with your own git.
 | `status <task_id> --live` | Also ask the service for the task's current status (needs a key) |
 | `continue <task_id>` | Resume a task that reached its budget |
 | `cancel <task_id>` | Stop tracking a task locally, and ask the service to stop it too |
+| `clean` | List the sandboxes your account still holds (deletes nothing) |
+| `clean --yes` | Delete the ones no unfinished task is using |
 
 ## Models
 
@@ -214,6 +216,11 @@ explicit preview revision. Google documents no deprecation policy for it, so
 when that revision is retired the first symptom is an error naming the agent,
 and the fix is one constant in `remote_worker/runner.py`.
 
+- Sandboxes outlive their tasks. A finished task leaves its sandbox — and the
+  repository mounted in it — on Google's servers for the rest of its 7-day
+  life. `clean` shows what you hold; `clean --yes` deletes what no unfinished
+  task is using. It lists the whole account's environments, not just the ones
+  this tool created, and it never deletes one an unfinished task points at.
 - A `repository` source is capped at **500 MB** by the service. Larger
   projects need the upload path (not implemented yet).
 - A foreground request holds one connection for the whole task and gives up at
@@ -279,11 +286,25 @@ point of the design — but the task text itself is not private.
 
 A mounted repository can carry its own `.agents/hooks.json`, and the service
 runs those hooks inside the sandbox on the agent's first tool call. So a
-third-party repository can execute code in the sandbox and, while sandbox
-egress is unlimited (the default), read `/workspace` and send it somewhere
-else. Against your own repositories the risk is effectively nil; against an
-unfamiliar fork it is not. Delegate only against repositories you own or
-trust.
+third-party repository can execute code in the sandbox and — while sandbox
+egress is unlimited, which is the default — read `/workspace` and send it
+somewhere else. Against your own repositories the risk is effectively nil;
+against an unfamiliar fork it is not.
+
+Delegate only against repositories you own or trust, or fence the egress and
+make the exfiltration fail:
+
+```bash
+remote-worker run "..." --repo <url> --allow-domain pypi.org
+remote-worker run "..." --repo <url> --no-network
+```
+
+The allowlist matches domains, not paths, and `*.example.com` does not cover
+`example.com` — the tool warns you when you left the root out. The fence is
+declared when the sandbox is created and every later turn rejoins that same
+sandbox, so it holds for the whole task. A task that needs to install packages
+needs the registries allowlisted, or it fails in a way the worker did not
+cause.
 
 ## Development
 

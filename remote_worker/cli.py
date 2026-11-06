@@ -54,6 +54,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--background", action="store_true",
                      help="run the task on the service and poll for it, so a "
                           "dropped connection does not lose the result")
+    run.add_argument("--allow-domain", action="append", default=None,
+                     metavar="DOMAIN",
+                     help="limit the sandbox's outbound traffic to this domain "
+                          "(repeatable); without it the sandbox reaches any "
+                          "host")
+    run.add_argument("--no-network", action="store_true",
+                     help="give the sandbox no outbound network at all")
 
     status = sub.add_parser("status", help="show one task or all of them")
     status.add_argument("task_id", nargs="?")
@@ -67,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     cancel = sub.add_parser("cancel", help="stop tracking a task")
     cancel.add_argument("task_id")
+
+    clean = sub.add_parser("clean",
+                           help="list sandboxes still held by your account")
+    clean.add_argument("--yes", action="store_true",
+                       help="actually delete them; without this flag nothing "
+                            "is removed")
 
     ask = sub.add_parser("ask", help="delegate a non-code task, get the text")
     ask.add_argument("task", help="the task, in plain language")
@@ -140,11 +153,24 @@ def main(argv=None, *, runner=None) -> int:
             model = args.model or stored["model"]
             budget = args.budget or stored["budget"]
             _check_model(parser, model, budget)
+            try:
+                planner.network_config(allow_domains=args.allow_domain,
+                                       no_network=args.no_network)
+            except ValueError as exc:
+                parser.error(str(exc))
+            for missing in planner.wildcard_gaps(args.allow_domain):
+                print(f"note: '*.{missing}' does not match the root domain "
+                      f"'{missing}'; add --allow-domain {missing} if you "
+                      "need it", file=sys.stderr)
             return _report_run(runner.run(
                 task=args.task, repo_url=args.repo, model=model,
                 budget=budget, branch=args.branch,
                 background=args.background,
+                allow_domains=args.allow_domain,
+                no_network=args.no_network,
             ))
+        if args.command == "clean":
+            return _report_clean(runner.clean(apply=args.yes))
         if args.command == "status":
             code = _report_status(runner.status(args.task_id))
             if args.live:
@@ -236,7 +262,8 @@ def _build_runner(parser, args):
 
     from .config import resolve_api_key
 
-    needs_key = getattr(args, "command", None) in ("run", "ask", "continue")
+    needs_key = getattr(args, "command", None) in ("run", "ask", "continue",
+                                                   "clean")
     wants_live = (getattr(args, "command", None) == "status"
                   and getattr(args, "live", False))
     api_key = resolve_api_key() or ""
@@ -375,6 +402,34 @@ def _report_live_status(runner, task_id: str) -> None:
     tokens = (interaction.get("usage") or {}).get("total_tokens")
     if tokens is not None:
         print(f"live tokens: {tokens}")
+
+
+def _report_clean(result: dict) -> int:
+    """Report a sandbox sweep, dry run or real (G2)."""
+    kept = result.get("kept_active") or []
+    candidates = result.get("candidates") or []
+    failed = result.get("failed") or []
+
+    if not result.get("applied"):
+        if not candidates:
+            print("no sandboxes to clean")
+        else:
+            for environment_id in candidates:
+                print(f"would delete: {environment_id}")
+            print(f"\n{len(candidates)} sandbox(es) can be deleted; nothing "
+                  "was removed yet -- run again with --yes")
+        for environment_id in kept:
+            print(f"kept (a task is still using it): {environment_id}")
+        return 0
+
+    for environment_id in result.get("deleted") or []:
+        print(f"deleted: {environment_id}")
+    for environment_id in kept:
+        print(f"kept (a task is still using it): {environment_id}")
+    for item in failed:
+        print(f"error deleting {item['environment_id']}: {item['error']}",
+              file=sys.stderr)
+    return 1 if failed else 0
 
 
 def _report_status(payload) -> int:
