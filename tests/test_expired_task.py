@@ -99,6 +99,11 @@ class ExpiredSandboxTest(unittest.TestCase):
     def test_continue_reports_expired_sandbox_instead_of_raw_404(self):
         task_id = self._record_incomplete()
         with FakeInteractionsServer() as srv:
+            # The pre-check read succeeds: the conversation is still there,
+            # only the sandbox is gone. The continuation then gets the 404.
+            srv.get_replies.append((200, json.dumps(
+                {"id": "v_old", "object": "interaction", "status": "incomplete",
+                 "usage": {}, "steps": []}).encode()))
             srv.replies = [(404, json.loads(NOT_FOUND_BODY))]
             result = self._runner(srv).continue_task(task_id=task_id)
             requests = list(srv.requests)
@@ -115,13 +120,29 @@ class ExpiredSandboxTest(unittest.TestCase):
 
         # Rule 3: no longer resumable.
         self.assertEqual(self.store.get(task_id)["status"], "expired")
-        # Rule 5: exactly one attempt.
-        self.assertEqual(len(requests), 1)
+        # Rule 5: one pre-check plus exactly one attempt at the continuation.
+        self.assertEqual([r["method"] for r in requests], ["GET", "POST"])
+
+    # The pre-check can find the conversation itself already gone (free tier
+    # keeps one for a day, which is usually the first clock to run out).
+    # Same verdict, one request fewer.
+    def test_gone_conversation_is_reported_expired_without_an_attempt(self):
+        task_id = self._record_incomplete(task_id="t_250")
+        with FakeInteractionsServer() as srv:
+            srv.get_replies = [(404, NOT_FOUND_BODY.encode())]
+            result = self._runner(srv).continue_task(task_id=task_id)
+            requests = list(srv.requests)
+        self.assertEqual(result["status"], "expired")
+        self.assertEqual([r["method"] for r in requests], ["GET"])
+        self.assertEqual(self.store.get(task_id)["status"], "expired")
 
     # Rule 4: never invent a number the record does not have.
     def test_message_omits_the_budget_when_the_record_has_none(self):
         task_id = self._record_incomplete(task_id="t_200", budget=None)
         with FakeInteractionsServer() as srv:
+            srv.get_replies.append((200, json.dumps(
+                {"id": "v_old", "object": "interaction", "status": "incomplete",
+                 "usage": {}, "steps": []}).encode()))
             srv.replies = [(404, json.loads(NOT_FOUND_BODY))]
             result = self._runner(srv).continue_task(task_id=task_id)
         self.assertEqual(result["status"], "expired")
@@ -131,6 +152,9 @@ class ExpiredSandboxTest(unittest.TestCase):
     def test_other_api_errors_still_raised(self):
         task_id = self._record_incomplete(task_id="t_300")
         with FakeInteractionsServer() as srv:
+            srv.get_replies.append((200, json.dumps(
+                {"id": "v_old", "object": "interaction", "status": "incomplete",
+                 "usage": {}, "steps": []}).encode()))
             srv.reply_status = 500
             srv.reply_body = {"error": {"message": "backend exploded",
                                         "status": "INTERNAL"}}
@@ -148,6 +172,9 @@ class ExpiredSandboxTest(unittest.TestCase):
 
         task_id = self._record_incomplete(task_id="t_400")
         with FakeInteractionsServer() as srv:
+            srv.get_replies.append((200, json.dumps(
+                {"id": "v_old", "object": "interaction", "status": "incomplete",
+                 "usage": {}, "steps": []}).encode()))
             srv.replies = [(404, json.loads(NOT_FOUND_BODY))]
             runner = self._runner(srv)
             out, err = io.StringIO(), io.StringIO()

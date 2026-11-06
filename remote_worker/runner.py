@@ -14,7 +14,8 @@ import time
 from urllib.parse import urlsplit
 
 from .engram_adapter import EngramMemory, MemoryDispatcher
-from .function_loop import run_until_complete
+from .function_loop import (RUNNING_STATUSES, WatchLimitExceeded,
+                            run_until_complete, wait_until_done)
 from .google_client import (FilesClient, InteractionsClient,
                             InteractionsError, InteractionsTimeoutError)
 from .planner import agent_config, worker_contract
@@ -51,7 +52,8 @@ class TaskRunner:
     def __init__(self, *, project: str, api_key: str,
                  client=None, files=None, dispatcher=None, store=None,
                  workdir: str | None = None,
-                 memory_enabled: bool = True):
+                 memory_enabled: bool = True,
+                 poll_interval: float = 5.0, max_polls: int = 360):
         self.project = project
         # Clients are created on first use: reading local task state must not
         # need an API key.
@@ -68,6 +70,10 @@ class TaskRunner:
             EngramMemory(project=project)
         )
         self.memory_enabled = memory_enabled
+        # The watch of a background interaction (G13): 5s apart, 30 minutes
+        # of reads by default, matching the service's own polling examples.
+        self.poll_interval = poll_interval
+        self.max_polls = max_polls
 
     @property
     def client(self):
@@ -83,7 +89,8 @@ class TaskRunner:
 
     def run(self, *, task: str, repo_url: str, model: str | None = None,
             budget: int | None = None,
-            branch: str | None = None) -> dict:
+            branch: str | None = None,
+            background: bool = False) -> dict:
         config = agent_config(model=model, budget=budget)
         repo_name = _repo_name(repo_url)
         repo_dir = f"/workspace/{repo_name}"
@@ -108,6 +115,7 @@ class TaskRunner:
             agent_config=config,
             system_instruction=contract,
             tools=tools,
+            background=background,
         )
         self.store.record({
             "task_id": task_id,
@@ -125,6 +133,30 @@ class TaskRunner:
 
         final = run_until_complete(self.client, self.dispatcher, interaction,
                                    system_instruction=contract, tools=tools)
+        if background:
+            try:
+                final = wait_until_done(
+                    self.client, self.dispatcher, final,
+                    poll_interval=self.poll_interval,
+                    max_polls=self.max_polls,
+                    system_instruction=contract, tools=tools,
+                )
+            except WatchLimitExceeded as exc:
+                # The watch ended, not the task: the interaction may still
+                # complete on its own. Keep it resumable and say so.
+                report = (f"still running when our watch ended ({exc}); "
+                          "the task is not lost — check with "
+                          f"'remote-worker status {task_id} --live' or "
+                          f"resume watching with 'remote-worker continue "
+                          f"{task_id}'")
+                self.store.record({"task_id": task_id,
+                                   "status": "incomplete",
+                                   "report": report})
+                return {
+                    "task_id": task_id, "status": "incomplete",
+                    "tokens": None, "budget": config["max_total_tokens"],
+                    "branch": branch, "report": report, "reason": "watch",
+                }
         status = final.get("status")
         tokens = self.client.usage(final).get("total_tokens")
         self.store.record({
@@ -198,6 +230,44 @@ class TaskRunner:
                 "only an incomplete task can continue"
             )
         config = agent_config(model=record.get("model"), budget=budget)
+        # G13: do not race a running interaction. Chaining to an interaction
+        # the service still reports as running is a documented 400, and a
+        # retry of it would fork a second branch of the conversation. Ask
+        # first, refuse with the honest instruction, send nothing.
+        # A record without an interaction id (or a machine without a key)
+        # cannot be checked and keeps the old behaviour.
+        if record.get("interaction_id") and self._api_key:
+            try:
+                current = self.client.get_interaction(record["interaction_id"])
+            except InteractionsError as exc:
+                if exc.status != 404:
+                    raise
+                # The conversation itself is gone (free tier keeps one for a
+                # day). Same verdict as a dead sandbox, found one step earlier.
+                report = _expired_report(record)
+                self.store.record({"task_id": task_id,
+                                   "status": "expired",
+                                   "report": report})
+                return {
+                    "task_id": task_id, "status": "expired", "tokens": None,
+                    "budget": None, "branch": record.get("branch"),
+                    "report": report,
+                }
+            if current.get("status") in RUNNING_STATUSES:
+                report = (f"the interaction is still running (status "
+                          f"{current.get('status')!r}); continuing now would "
+                          "be rejected by the service. Check with "
+                          f"'remote-worker status {task_id} --live', or stop "
+                          f"it with 'remote-worker cancel {task_id}'")
+                return {
+                    "task_id": task_id,
+                    "status": "incomplete",
+                    "tokens": self.client.usage(current).get("total_tokens"),
+                    "budget": None,
+                    "branch": record.get("branch"),
+                    "report": report,
+                    "reason": "running",
+                }
         # G15: system_instruction and tools are interaction-scoped, so this
         # continuation must re-send them. Rebuild them from the task record:
         # run tasks get the repo contract and the code tools, ask tasks get
@@ -337,7 +407,7 @@ class TaskRunner:
 
     def ask(self, task: str, *, model: str | None = None,
             budget: int | None = None, project: str | None = None,
-            stream: bool = False) -> dict:
+            stream: bool = False, background: bool = False) -> dict:
         """Delegate a NON-code task and return the worker's text.
 
         Unlike :meth:`run`, ask does NOT mount a repository and does NOT
@@ -378,6 +448,7 @@ class TaskRunner:
                 agent_config=config,
                 system_instruction=contract,
                 tools=tools,
+                background=background,
             )
         self.store.record({
             "task_id": task_id, "kind": "ask",
@@ -390,6 +461,25 @@ class TaskRunner:
 
         final = run_until_complete(self.client, self.dispatcher, interaction,
                                    system_instruction=contract, tools=tools)
+        if background:
+            try:
+                final = wait_until_done(
+                    self.client, self.dispatcher, final,
+                    poll_interval=self.poll_interval,
+                    max_polls=self.max_polls,
+                    system_instruction=contract, tools=tools,
+                )
+            except WatchLimitExceeded as exc:
+                report = (f"still running when our watch ended ({exc}); the "
+                          "answer is not lost — check with "
+                          f"'remote-worker status {task_id} --live'")
+                self.store.record({"task_id": task_id,
+                                   "status": "incomplete",
+                                   "report": report})
+                return {"task_id": task_id, "status": "incomplete",
+                        "tokens": None,
+                        "budget": config["max_total_tokens"],
+                        "text": report, "reason": "watch"}
         status = final.get("status")
         tokens = self.client.usage(final).get("total_tokens")
         text = self.client.last_model_output(final)

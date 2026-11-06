@@ -51,6 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="local branch name for the result")
     run.add_argument("--project", default=None,
                      help="Engram project (defaults to the repo name)")
+    run.add_argument("--background", action="store_true",
+                     help="run the task on the service and poll for it, so a "
+                          "dropped connection does not lose the result")
 
     status = sub.add_parser("status", help="show one task or all of them")
     status.add_argument("task_id", nargs="?")
@@ -72,6 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--budget", type=int, default=None)
     ask.add_argument("--stream", action="store_true",
                      help="stream the worker's progress live")
+    ask.add_argument("--background", action="store_true",
+                     help="run the task on the service and poll for it, so a "
+                          "dropped connection does not lose the result")
 
     setup = sub.add_parser("setup", help="store defaults and install the skill")
     setup.add_argument("--model", default=None,
@@ -109,6 +115,15 @@ def main(argv=None, *, runner=None) -> int:
         if args.command == "ask":
             from .config import load_config
 
+            if args.stream and args.background:
+                # Streaming reads the answer off one open connection; the
+                # whole point of background is that no connection is held. The
+                # combination has no documented meaning, so it is refused
+                # rather than silently resolved by preferring one of them.
+                parser.error("--stream and --background cannot be combined: "
+                             "pick --stream to watch it live, or --background "
+                             "to keep the result across a dropped "
+                             "connection")
             stored = load_config()
             model = args.model or stored["model"]
             budget = args.budget or stored["budget"]
@@ -116,6 +131,7 @@ def main(argv=None, *, runner=None) -> int:
             return _report_ask(runner.ask(
                 task=args.task, model=model, budget=budget,
                 stream=getattr(args, "stream", False),
+                background=args.background,
             ))
         if args.command == "run":
             from .config import load_config
@@ -127,6 +143,7 @@ def main(argv=None, *, runner=None) -> int:
             return _report_run(runner.run(
                 task=args.task, repo_url=args.repo, model=model,
                 budget=budget, branch=args.branch,
+                background=args.background,
             ))
         if args.command == "status":
             code = _report_status(runner.status(args.task_id))
@@ -249,11 +266,19 @@ def _report_run(result: dict) -> int:
 
     tokens = result.get("tokens")
     budget = result.get("budget")
-    if tokens is not None:
-        suffix = f" of {budget}" if budget else ""
-        print(f"tokens: {tokens}{suffix}")
+    if tokens is not None and budget:
+        print(f"tokens: {tokens} of {budget}")
+    elif tokens is not None:
+        print(f"tokens: {tokens}")
 
     if status == "incomplete":
+        reason = result.get("reason")
+        if reason in ("running", "watch"):
+            # Not a budget stop: saying so, and printing a `continue` we just
+            # refused to run, would send the user in circles.
+            print(result.get("report") or
+                  "the interaction is still running.")
+            return 0
         print(
             "the agent reached its token budget; the task is incomplete, "
             "not failed."
@@ -290,10 +315,14 @@ def _report_ask(result: dict) -> int:
     print(f"status: {status}")
     tokens = result.get("tokens")
     budget = result.get("budget")
-    if tokens is not None:
-        suffix = f" of {budget}" if budget else ""
-        print(f"tokens: {tokens}{suffix}")
+    if tokens is not None and budget:
+        print(f"tokens: {tokens} of {budget}")
+    elif tokens is not None:
+        print(f"tokens: {tokens}")
     if status == "incomplete":
+        if result.get("reason") in ("running", "watch"):
+            print(result.get("text") or result.get("report") or "")
+            return 0
         print("the agent reached its token budget; the task is incomplete.")
         print(f"resume it with: remote-worker continue {task_id}")
         return 0

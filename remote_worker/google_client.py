@@ -149,7 +149,8 @@ class InteractionsClient:
     def create_interaction(self, *, agent: str, input,
                            environment="remote", agent_config=None,
                            tools=None, system_instruction=None,
-                           previous_interaction_id=None) -> dict:
+                           previous_interaction_id=None,
+                           background=False) -> dict:
         """Create one interaction and return the parsed interaction dict.
 
         ``input`` is a string for a new turn, or a list of step dicts (for
@@ -168,6 +169,10 @@ class InteractionsClient:
             body["system_instruction"] = system_instruction
         if previous_interaction_id is not None:
             body["previous_interaction_id"] = previous_interaction_id
+        if background:
+            # Top-level, input-only, and only sent when asked: the default
+            # request body must stay exactly what it was (G13).
+            body["background"] = True
 
         url = self._base_url + "/v1beta/interactions"
         _trace_request("POST", url, body)

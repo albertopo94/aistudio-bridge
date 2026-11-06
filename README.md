@@ -124,8 +124,10 @@ merges the result itself — review the branch, then merge it with your own git.
 | `setup --list-skill-backups` | List recoverable versions of the skill |
 | `setup --restore-skill` | Restore the skill from its most recent backup (factory reset if it was the zero state) |
 | `run "<task>" --repo <url>` | Delegate one CODE task, bring the diff back |
+| `run "<task>" --repo <url> --background` | Same, but the service runs it and we poll — a dropped connection cannot lose the result |
 | `ask "<task>"` | Delegate a NON-code task, get the text back (no repo mounted) |
 | `ask "<task>" --stream` | Same, but print the worker's text live as it is generated |
+| `ask "<task>" --background` | Same, but poll instead of holding one connection open (cannot combine with `--stream`) |
 | `status [task_id]` | List tasks, or show one (works offline, no key needed) |
 | `status <task_id> --live` | Also ask the service for the task's current status (needs a key) |
 | `continue <task_id>` | Resume a task that reached its budget |
@@ -214,6 +216,11 @@ and the fix is one constant in `remote_worker/runner.py`.
 
 - A `repository` source is capped at **500 MB** by the service. Larger
   projects need the upload path (not implemented yet).
+- A foreground request holds one connection for the whole task and gives up at
+  600 seconds, losing the result in your terminal even though the sandbox kept
+  working. For anything long, use `--background`: the service runs the task,
+  and this tool polls it. When the watch runs out the task is still not lost —
+  `status <task_id> --live` reads the real status, `continue` picks it up.
 - Free-tier quota is per project and per day. `tokens:` after each run tells
   you what it cost; `--budget` caps a single task.
 - Hitting the budget is not a failure: the run exits 0, reports

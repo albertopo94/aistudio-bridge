@@ -13,6 +13,19 @@ from __future__ import annotations
 
 MAX_STEPS_DEFAULT = 10
 
+#: Statuses the service reports while an interaction is still working. There
+#: is no ``queued`` status (API reference, Interaction resource).
+RUNNING_STATUSES = ("in_progress", "requires_action")
+
+
+class WatchLimitExceeded(RuntimeError):
+    """The bounded watch of a background interaction ran out.
+
+    This is the *watch* ending, not the task failing: the interaction may
+    still complete while nobody is looking, so the caller keeps the task
+    resumable.
+    """
+
 
 class LoopLimitExceeded(RuntimeError):
     """The agent kept requesting functions past the configured bound."""
@@ -96,4 +109,42 @@ def run_until_complete(client, dispatcher, interaction: dict, *,
         )
         steps_taken += 1
 
+    return interaction
+
+
+def wait_until_done(client, dispatcher, interaction: dict, *,
+                    poll_interval: float = 5.0,
+                    max_polls: int = 360,
+                    system_instruction=None,
+                    tools=None,
+                    on_event=None) -> dict:
+    """Follow a background interaction to a terminal status (G13).
+
+    A background create returns while the work is still running, and the
+    only way to follow it is reading the stored interaction back. Each read
+    is one GET; a read that reports ``requires_action`` is answered through
+    :func:`run_until_complete`, which re-sends the contract and the tools on
+    its continuation (G15 has to hold inside the watch loop too), and the
+    watch continues from the interaction that round trip returned.
+
+    Raises :class:`WatchLimitExceeded` when ``max_polls`` reads still find
+    the interaction running. ``poll_interval`` seconds separate the reads.
+    """
+    polls = 0
+    while interaction.get("status") in RUNNING_STATUSES:
+        if polls >= max_polls:
+            raise WatchLimitExceeded(
+                f"the interaction is still running after {max_polls} polls"
+            )
+        if polls:
+            import time
+            time.sleep(poll_interval)
+        polls += 1
+        interaction = client.get_interaction(interaction.get("id"))
+        if interaction.get("status") == "requires_action":
+            interaction = run_until_complete(
+                client, dispatcher, interaction,
+                system_instruction=system_instruction, tools=tools,
+                on_event=on_event,
+            )
     return interaction

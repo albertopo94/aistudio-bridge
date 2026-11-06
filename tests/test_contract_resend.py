@@ -148,6 +148,10 @@ class TestContractResend(unittest.TestCase):
             "task": "earlier task",
         })
         with FakeInteractionsServer() as srv:
+            # The pre-check read says the conversation is over, then the
+            # continuation is sent and completes.
+            srv.get_replies.append((200, json.dumps(
+                _interaction("completed", iid="v9")).encode()))
             srv.reply_body = _interaction("completed", iid="v10")
             runner = self._runner(srv)
             result = runner.continue_task(task_id="t_old")
@@ -168,6 +172,8 @@ class TestContractResend(unittest.TestCase):
             "task": "earlier task",
         })
         with FakeInteractionsServer() as srv:
+            srv.get_replies.append((200, json.dumps(
+                _interaction("completed", iid="v9")).encode()))
             srv.reply_body = _interaction("completed", iid="v10")
             runner = self._runner(srv)
             result = runner.continue_task(task_id="t_legacy")
