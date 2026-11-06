@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.10.0] — 2026-11-06
+
+### Added
+
+- `REMOTE_WORKER_TRACE`: point it at a path and every request is appended as
+  one JSON line (method, URL, body). The API key is never recorded — it lives
+  in a header the trace does not read — and credential-shaped fields inside a
+  body are written as `[masked]`. Tracing is opt-in, never alters the request
+  that goes out, and an unwritable path is skipped rather than failing the
+  task. It exists so "did the worker contract really travel on that call?"
+  is answered with evidence: the first live run proved a continuation carries
+  the same 1052-character contract and the same tool set as the first turn.
+- `-v` as an alias of `--version`.
+- README: a "Delegating from your agent" section with example prompts that
+  name the trigger and the mode (`run` for code, `ask` for answers).
+
+### Changed
+
+- The "First run" example points at this repository instead of the PoC toy
+  repository, and its output block is labelled as sample output.
+- "Limits worth known" separates the two clocks that expire — the sandbox at
+  7 days and the interaction at 1 day on the free tier — which the previous
+  wording conflated, and documents the sandbox stack, what the worker can
+  read (text and image only), that `max_total_tokens` is best-effort, that
+  generation parameters are rejected, and why a rate limit never retries.
+- "Security" now states what stays server-side at Google, why `store=false`
+  is not available to a resumable task, and why to delegate only against
+  repositories you own or trust (a mounted repo can ship `.agents/hooks.json`).
+- New "What a task costs" section; the free-tier claim is scoped to
+  Antigravity, since a Deep Research backend costs US$1–7 per task.
+- `gemini-4-argon` is documented as outside Google's managed-agent model set:
+  it works inline today, and `--model gemini-4-argon` is what would break if
+  that set ever narrowed.
+
 ## [0.9.3] — 2026-11-05
 
 ### Fixed
