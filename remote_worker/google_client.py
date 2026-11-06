@@ -242,6 +242,41 @@ class InteractionsClient:
             raise InteractionsError(0, "stream ended without interaction.completed")
         return final
 
+    def _interaction_url(self, interaction_id: str, verb: str = "") -> str:
+        if not interaction_id:
+            raise ValueError("interaction_id is required")
+        url = (f"{self._base_url}/v1beta/interactions/"
+               f"{urllib.parse.quote(interaction_id, safe='')}")
+        return url + verb
+
+    def get_interaction(self, interaction_id: str) -> dict:
+        """Read one interaction back from the service (G18).
+
+        The create response carries only the steps the model generated; the
+        stored resource is the complete record, and it is the only way to
+        learn the current status of work that is no longer in this process.
+        An interaction past its retention comes back as a 404.
+        """
+        url = self._interaction_url(interaction_id)
+        _trace_request("GET", url, None)
+        raw = _send("GET", url, self._api_key, self._timeout)
+        return json.loads(raw.decode("utf-8"))
+
+    def cancel_interaction(self, interaction_id: str) -> dict:
+        """Ask the service to stop an interaction (G12).
+
+        The verb is a path segment (``/cancel``), not a ``:cancel`` custom
+        verb, and the request carries no body. The service answers with the
+        interaction, whose status becomes ``cancelled``. Only a running
+        interaction can be cancelled; what the service reports for one that
+        already finished is undocumented, so a caller must treat a failure as
+        information rather than as a failed operation.
+        """
+        url = self._interaction_url(interaction_id, "/cancel")
+        _trace_request("POST", url, None)
+        raw = _send("POST", url, self._api_key, self._timeout)
+        return json.loads(raw.decode("utf-8"))
+
     def last_model_output(self, interaction: dict) -> str:
         """Return the text of the LAST ``model_output`` step.
 

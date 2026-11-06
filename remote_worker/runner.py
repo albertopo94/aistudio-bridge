@@ -15,7 +15,8 @@ from urllib.parse import urlsplit
 
 from .engram_adapter import EngramMemory, MemoryDispatcher
 from .function_loop import run_until_complete
-from .google_client import FilesClient, InteractionsClient, InteractionsError
+from .google_client import (FilesClient, InteractionsClient,
+                            InteractionsError, InteractionsTimeoutError)
 from .planner import agent_config, worker_contract
 from .state import DEFAULT_ROOT, TaskStore, _slug
 from .sync import apply_to_branch, mount_repo, run_tests
@@ -280,12 +281,60 @@ class TaskRunner:
 
     def cancel(self, task_id: str) -> dict:
         record = self.store.get(task_id)
+        # The local record is always canceled: that is the part this tool owns.
+        # Stopping the remote work is best-effort on top of it, because the
+        # service only cancels a running interaction and does not document
+        # what it says about one that already finished (G12). A failure there
+        # is reported, never raised, and never undoes the local cancel.
+        interaction_id = record.get("interaction_id")
+        remote_error = None
+        if interaction_id and self._api_key:
+            try:
+                self.client.cancel_interaction(interaction_id)
+            except (InteractionsError, InteractionsTimeoutError) as exc:
+                remote_error = str(exc)
         updated = self.store.record({
             "task_id": task_id,
             "status": "canceled",
-            "note": "canceled locally; the Google interaction may still finish",
+            "note": ("canceled through the service" if not remote_error
+                     else "canceled locally; the service refused the cancel"
+                     f": {remote_error}"),
         })
-        return {**record, **updated}
+        return {
+            **record,
+            **updated,
+            "remote_canceled": bool(interaction_id and self._api_key
+                                    and not remote_error),
+            "remote_error": remote_error,
+        }
+
+    def live_status(self, task_id: str) -> dict:
+        """Ask the service what it thinks of a recorded task (G18).
+
+        Local state says what we last saw; only the service knows whether the
+        work went on after this process stopped watching. ``error`` carries a
+        readable reason when the service has no such interaction any more.
+        """
+        record = self.store.get(task_id)
+        interaction_id = record.get("interaction_id")
+        if not interaction_id:
+            return {"record": record, "interaction": None,
+                    "error": "this task has no interaction recorded, so the "
+                             "service cannot be asked"}
+        try:
+            interaction = self.client.get_interaction(interaction_id)
+        except InteractionsError as exc:
+            if exc.status == 404:
+                return {
+                    "record": record,
+                    "interaction": None,
+                    "error": f"the service no longer has interaction "
+                             f"{interaction_id} (its retention ran out); the "
+                             f"local record is stale",
+                }
+            raise
+        return {"record": record, "interaction": interaction, "error": None}
+
     def ask(self, task: str, *, model: str | None = None,
             budget: int | None = None, project: str | None = None,
             stream: bool = False) -> dict:
