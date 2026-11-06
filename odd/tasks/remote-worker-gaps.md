@@ -113,3 +113,18 @@ the whole backlog, work unit by work unit, on a feature branch.
   Process note: a sloppy edit briefly orphaned code at the end of `continue_task`
   and dropped `def status`; caught by `py_compile` + a `grep -n "def "` of the
   class, restored in the same slice before commit.
+- **L12** (decision, delivery strategy) The branch now carries 824 authored changed
+  lines across 8 commits, past the ~400-line guide. This feature is deliberately one
+  long backlog, so the delivery strategy is: **each work unit is its own reviewable
+  slice** (own commits, own CHANGELOG entry, own version bump, green suite at its
+  commit), and review happens per work unit rather than per branch. If a PR is opened
+  later it gets split at these boundaries; nothing is squashed. Recorded here because
+  the slice guard measures the branch as a whole.
+- **L13** (decision, routing) The remaining code units (G12, G18, G13, streaming for
+  `run`, G1, G2, G7, G11/G28, G23) all edit `cli.py` + `runner.py` + `google_client.py`
+  + tests, so their edit surfaces are NOT disjoint: parallel writers would overwrite
+  each other and the parent's inline route would spend the remaining context budget on
+  ~800 lines. Route: sequential task-mode worker deliveries of one work unit each, and
+  the parent verifies the suite and commits each delivery before launching the next.
+  Workers must confirm each endpoint's exact payload against the official doc before
+  implementing (AGENTS.md §1: never invent an API).
