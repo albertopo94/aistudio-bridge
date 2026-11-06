@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.20.1] — 2026-11-06
+
+### Documentation
+
+- The feature document (`odd/tasks/remote-worker-gaps.md`) records the commit
+  each task landed in, so the log can be followed from a task to the code.
+
 ## [0.20.0] — 2026-11-06
 
 ### Added

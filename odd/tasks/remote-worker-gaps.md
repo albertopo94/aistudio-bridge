@@ -76,8 +76,8 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T19 | closing | docs: mark every gap closed in the plan index; ADR 0001 reminder to the user | docs(closing) |
 | T20 | S8 | inline: G19 — recognise a 429 and explain the no-retry rule (SSE currently loses the HTTP status) | fix(rate-limit) |
 | T21 | S10,S11 | inline, test-first: route table as a data module + `routes` command + the fair-use 400 mapped to an actionable message; delete the fake 1.5 GiB guard | feat(routes) 98ec5cc + v0.18.0 d03b5ab |
-| T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) + v0.19.0 |
-| T23 | S12 | inline, test-first: `probe` command | feat(probe) + v0.20.0 |
+| T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) e3b4ca7 + v0.19.0 622d3a2 |
+| T23 | S12 | inline, test-first: `probe` command | feat(probe) 25461f9 + v0.20.0 dfc60b4 |
 | T24 | S11 | **blocked** — live validation of sharded upload before it may be advertised; needs the user's quota OK | — |
 | T25 | S11 | **blocked** — live end-to-end `--local-repo` run + `--delete-env` decision; needs the user's quota OK | — |
 
