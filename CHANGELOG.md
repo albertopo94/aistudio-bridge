@@ -5,6 +5,34 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.11.0] — 2026-11-06
+
+### Added
+
+- `status <task_id> --live` asks the service for the interaction's current
+  status. `status` without the flag still sends no request and needs no API
+  key. Reading an interaction is the only way to learn what became of work this
+  process stopped watching, because the create response carries only the
+  model's own steps; a record past its retention is reported as stale (G18).
+- `cancel` also stops the interaction on the service
+  (`POST /v1beta/interactions/{id}/cancel`, no body) instead of only writing
+  local state. The local cancel always happens; the remote one is best-effort,
+  because the service documents cancellation only for running interactions and
+  says nothing about one that already finished, so a refusal is reported rather
+  than turned into a failed command (G12).
+
+### Changed
+
+- `cancel` now says whether the service was reached. It previously printed
+  "local tracking only" even when the remote stop had succeeded.
+- An API error no longer escapes as a traceback. `main` handled only `KeyError`
+  and `ValueError`, so a rate limit printed a Python stack. A 429 now exits 4
+  and explains that the quota window is what to wait on, and why the client
+  never retries automatically: a continuation carries
+  `previous_interaction_id`, so a blind retry is not idempotent — it forks the
+  conversation and bills the same work twice. Other API errors keep their own
+  message and exit 1 (G19).
+
 ## [0.10.1] — 2026-11-06
 
 ### Fixed

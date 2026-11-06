@@ -57,6 +57,7 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T17 | S2 | depends on T16: G4 resumable upload for repos > 500 MB | feat(upload) |
 | T18 | S2 | last, needs a user product decision on cost: G25 research mode (+G26,G29,G30) | feat(research) |
 | T19 | closing | docs: mark every gap closed in the plan index; ADR 0001 reminder to the user | docs(closing) |
+| T20 | S8 | inline: G19 — recognise a 429 and explain the no-retry rule (SSE currently loses the HTTP status) | fix(rate-limit) |
 
 ## Log
 
@@ -128,3 +129,30 @@ the whole backlog, work unit by work unit, on a feature branch.
   the parent verifies the suite and commits each delivery before launching the next.
   Workers must confirm each endpoint's exact payload against the official doc before
   implementing (AGENTS.md §1: never invent an API).
+
+- **L14** (defect in my own verification harness — read before trusting any earlier
+  "differential check: SAME" in this Log) The differential runs compared base and new
+  code with `PYTHONPATH=<base>` and `PYTHONPATH=<new>` while the shell sat in the repo
+  root. `python3 -m` puts the CWD first on `sys.path`, ahead of `PYTHONPATH`, so BOTH
+  sides imported the working tree and every comparison returned SAME. The earlier claims
+  at L6 and L11 therefore proved nothing. Corrected harness: run each side from an empty
+  temp directory (`cd $NULLDIR`) so `PYTHONPATH` decides the import, and prove it with a
+  sanity line (base has no `--live`, new does). Re-run of the accumulated `main` (0.9.3)
+  vs worktree (0.10.1+) over 9 offline commands: only `--version` (the bump) and `-h`
+  (`--version, -v`) differ, which is exactly what the work unit intends.
+- **L15** (evidence) T13+T8+T20 (G12/G18/G19) delivered inline, v0.11.0. Writer was
+  launched once and failed (subagent model unavailable); per the no-retry rule the unit
+  was done inline. RED observed per cause: `AttributeError: 'InteractionsClient' object
+  has no attribute 'cancel_interaction'/'get_interaction'`, `KeyError: 'remote_canceled'`,
+  `SystemExit: 2` for the unknown `--live`, and `'local tracking only'` still printed.
+  GREEN: 16 new tests, suite 115/115 (was 99). Two test bugs fixed, not implementation
+  bugs: constructing a client with an empty key (the real CLI builds no client at all
+  without a key) and asserting the word "remote" where the CLI says "service".
+- **L16** (contract correction) The gap index claimed `POST /v1beta/interactions/{id}
+  :cancel`. The API reference names a path segment `/cancel` and no request body, and the
+  response status is spelled `cancelled`. Also from the same pass, needed by T14/G13:
+  background is a TOP-LEVEL boolean `background`, incompatible with `store=false` (400),
+  there is NO `queued` status (running is `in_progress` / `requires_action`), polling is
+  `GET /v1beta/interactions/{id}`, and an SSE stream can be resumed with
+  `GET ...?stream=true&last_event_id=<id>`. Chaining to an `in_progress` interaction
+  returns 400, which constrains how `continue` may meet a background task.
