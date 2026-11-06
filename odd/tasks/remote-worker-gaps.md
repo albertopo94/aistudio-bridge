@@ -52,9 +52,9 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T12 | S2 | probe + decide: G24 tools set for `run` (google_search) | feat(tools) |
 | T13 | S2 | inline: G12 server-side cancel | feat(cancel) |
 | T14 | S2 | writer candidate: G13 background + polling + SSE reconnect | feat(background) |
-| T15 | pending | inline: streaming SSE for `run` (parity with `ask`) | feat(stream-run) |
-| T16 | S2 | PoC ~15 min: G5 upload ceiling 1.5 GB → decides whether G4 needs GCS | docs(poc) |
-| T17 | S2 | depends on T16: G4 resumable upload for repos > 500 MB | feat(upload) |
+| T15 | dropped | inline: streaming SSE for `run` (parity with `ask`) | — (see L18) |
+| T16 | S2 | PoC ~15 min: G5 upload ceiling 1.5 GB → decides whether G4 needs GCS. Script ready (`poc/g5_upload_ceiling.sh`); **live run is the user's** (consumes his API quota) | docs(poc) + v0.16.0 |
+| T17 | S2 | depends on T16: G4 resumable upload for repos > 500 MB. `UploadClient` + `tar_gz_bytes` done (v0.16.0); runner wiring waits on the G5 verdict | feat(upload) |
 | T18 | S2 | last, needs a user product decision on cost: G25 research mode (+G26,G29,G30) | feat(research) |
 | T19 | closing | docs: mark every gap closed in the plan index; ADR 0001 reminder to the user | docs(closing) |
 | T20 | S8 | inline: G19 — recognise a 429 and explain the no-retry rule (SSE currently loses the HTTP status) | fix(rate-limit) |
@@ -166,3 +166,33 @@ the whole backlog, work unit by work unit, on a feature branch.
   (3) the pre-check read in `continue` turned the sandbox-404 path into "conversation
   gone" one step earlier, pinned as its own test. Differential (correct harness): only
   run -h / ask -h / status -h differ from main, all new flags.
+
+- **L18** (decision) T15 (streaming SSE for `run`) is **dropped**, not deferred.
+  The memory function-calling loop cannot interleave with a one-shot stream: a
+  `requires_action` round trip needs a `function_result` injected as the next
+  turn, and the stream closes on the first turn. Disabling memory for a
+  streaming run would remove the product's core design. `--background` (G13,
+  v0.12.0) already solves the real failure it would have fixed (connection
+  drops losing long-task results). Revisit only if the service documents SSE
+  + `requires_action` interleaving.
+
+- **L19** (incident, outside this list) Mid-session, the host's model router
+  returned repeated 502s (rate_limited ×n, upstream_error, timeout, model_not_found,
+  daily_quota_exhausted across all routed providers) and stalled the session.
+  Provider-side, not repo work: the suite had gone 180/180 green and the G5/G4
+  unit was on disk. State saved here + Engram (obs 2103) so a fresh session can
+  resume: upload client, tar_gz, PoC script ready; G5 live run pending the
+  user's command `bash poc/g5_upload_ceiling.sh`.
+
+- **L20** (evidence) G5/G4 groundwork unit, v0.15.0 → 0.16.0. `UploadClient`
+  in `remote_worker/google_client.py` (init/chunks/resume per the documented
+  resumable protocol; `UploadResumeError` on an unusable `Range`; `UploadError`
+  with status+body on a non-308 chunk reply), `tar_gz_bytes` in
+  `remote_worker/sync.py`, 6 new tests in `tests/test_upload_client.py`
+  (suite 180/180), and `poc/g5_upload_ceiling.sh` (1.5 GiB, 10 MB pre-cut
+  slices, records the byte offset where a non-308 arrives, deletes the
+  environment on exit — which also exercises the G2 DELETE). Review note:
+  the first draft of the PoC sent the whole 1.5 GiB blob per chunk
+  (`--data-binary @$BLOB`) — 225 GB of traffic and a meaningless
+  measurement; caught before the user ran it, fixed with pre-cut slice
+  files plus a total-size sanity check.

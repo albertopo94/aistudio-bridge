@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.16.0] — 2026-11-06
+
+### Added
+
+- `UploadClient` (`remote_worker/google_client.py`): a resumable upload to an
+  environment. The session is opened with `PUT /upload/v1beta/environments/
+  {env}/files/{path}?uploadType=resumable`, then the file goes out in 10 MB
+  chunks with a `Content-Range` header. A `308 Resume Incomplete` moves the
+  cursor to where the server says it committed; a `308` without a usable
+  `Range` raises `UploadResumeError` instead of resuming from a guessed
+  offset. A non-308 reply fails the upload with the status and the body.
+- `tar_gz_bytes` (`remote_worker/sync.py`): packs `{path: bytes}` into a
+  gzip tarball in memory, so a repository over the 500 MB `repository`
+  source cap can travel as an uploaded archive (G4 groundwork; the PoC
+  `poc/g5_upload_ceiling.sh` measures the direct-upload ceiling that decides
+  whether the GCS fallback is needed).
+
 ## [0.15.0] — 2026-11-06
 
 ### Added
