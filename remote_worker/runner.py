@@ -20,7 +20,8 @@ from .function_loop import (RUNNING_STATUSES, WatchLimitExceeded,
 from .google_client import (EnvironmentsClient, FilesClient,
                             InteractionsClient, InteractionsError,
                             InteractionsTimeoutError)
-from .planner import agent_config, network_config, worker_contract
+from .planner import (agent_config, network_config, task_parts,
+                      worker_contract)
 from .state import DEFAULT_ROOT, TaskStore, _slug
 from .sync import (apply_to_branch, inline_source, mount_repo, run_tests,
                    INLINE_TOTAL_LIMIT_BYTES)
@@ -106,7 +107,8 @@ class TaskRunner:
             allow_domains=None, no_network: bool = False,
             reuse_env: str | None = None,
             agents_file: str | None = None,
-            mount_files=None) -> dict:
+            mount_files=None,
+            images=None) -> dict:
         config = agent_config(model=model, budget=budget)
         network = network_config(allow_domains=allow_domains,
                                  no_network=no_network)
@@ -142,7 +144,7 @@ class TaskRunner:
                 environment["network"] = network
         interaction = self.client.create_interaction(
             agent=AGENT,
-            input=task,
+            input=task_parts(task, images),
             environment=environment,
             agent_config=config,
             system_instruction=contract,
@@ -513,7 +515,8 @@ class TaskRunner:
 
     def ask(self, task: str, *, model: str | None = None,
             budget: int | None = None, project: str | None = None,
-            stream: bool = False, background: bool = False) -> dict:
+            stream: bool = False, background: bool = False,
+            images=None) -> dict:
         """Delegate a NON-code task and return the worker's text.
 
         Unlike :meth:`run`, ask does NOT mount a repository and does NOT
@@ -549,7 +552,7 @@ class TaskRunner:
         else:
             interaction = self.client.create_interaction(
                 agent=AGENT,
-                input=task,
+                input=task_parts(task, images),
                 environment="remote",
                 agent_config=config,
                 system_instruction=contract,

@@ -73,6 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="place a local text file at TARGET inside the "
                           "sandbox (repeatable), e.g. a skill at "
                           "/.agents/skills/<name>/SKILL.md")
+    run.add_argument("--image", action="append", default=None, metavar="PATH",
+                     help="send an image with the task (repeatable): png, "
+                          "jpeg, gif or webp")
 
     status = sub.add_parser("status", help="show one task or all of them")
     status.add_argument("task_id", nargs="?")
@@ -103,6 +106,10 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--background", action="store_true",
                      help="run the task on the service and poll for it, so a "
                           "dropped connection does not lose the result")
+    ask.add_argument("--image", action="append", default=None,
+                     metavar="PATH",
+                     help="send an image with the task (repeatable): png, "
+                          "jpeg, gif or webp")
 
     setup = sub.add_parser("setup", help="store defaults and install the skill")
     setup.add_argument("--model", default=None,
@@ -153,10 +160,15 @@ def main(argv=None, *, runner=None) -> int:
             model = args.model or stored["model"]
             budget = args.budget or stored["budget"]
             _check_model(parser, model, budget)
+            try:
+                images = _check_images(args.image)
+            except ValueError as exc:
+                parser.error(str(exc))
             return _report_ask(runner.ask(
                 task=args.task, model=model, budget=budget,
                 stream=getattr(args, "stream", False),
                 background=args.background,
+                images=images,
             ))
         if args.command == "run":
             from .config import load_config
@@ -176,6 +188,7 @@ def main(argv=None, *, runner=None) -> int:
                       "need it", file=sys.stderr)
             try:
                 mount_files = _split_mount_files(args.mount_file)
+                images = _check_images(args.image)
             except ValueError as exc:
                 parser.error(str(exc))
             if args.reuse_env is not None and not args.reuse_env.strip():
@@ -190,6 +203,7 @@ def main(argv=None, *, runner=None) -> int:
                 reuse_env=args.reuse_env,
                 agents_file=args.agents_file,
                 mount_files=mount_files,
+                images=images,
             ))
         if args.command == "clean":
             return _report_clean(runner.clean(apply=args.yes))
@@ -305,6 +319,20 @@ def _guess_project(args) -> str:
     the sandbox is usually a *different* checkout and rarely a match.
     """
     return os.path.basename(os.getcwd()) or "default"
+
+
+def _check_images(values):
+    """Existence is checked here, content type further down.
+
+    A missing path is a typo the user can fix immediately, so it is a usage
+    error before any request. Whether the bytes are an image the agent can
+    read is decided by the part builder, which is the one place that knows the
+    accepted signatures.
+    """
+    for path in values or []:
+        if not os.path.isfile(path):
+            raise ValueError(f"no such image file: {path}")
+    return list(values) if values else None
 
 
 def _split_mount_files(values):

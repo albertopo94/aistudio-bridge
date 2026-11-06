@@ -12,6 +12,8 @@ Two decisions live here, and only here:
 
 from __future__ import annotations
 
+import base64
+
 #: Refuse anything below this pair.
 ALLOWED_MODELS = ("gemini-4-argon", "gemini-3.8-flash")
 DEFAULT_MODEL = "gemini-3.8-flash"
@@ -93,6 +95,73 @@ def wildcard_gaps(allow_domains):
     listed = {(d or "").strip() for d in (allow_domains or [])}
     return sorted(d[2:] for d in listed
                   if d.startswith("*.") and d[2:] not in listed)
+
+
+#: Our own ceiling for one input image. The service does not publish a per-
+#: image limit, so this is a guard against reading a whole directory of
+#: screenshots into one request body -- it is ours, and says so.
+IMAGE_INPUT_LIMIT_BYTES = 20 * 1024 * 1024
+
+#: Magic numbers for the image kinds Antigravity accepts. The type is taken
+#: from the bytes, never from the extension: a file named .jpg that holds a
+#: PNG must be sent as what it is, or the service cannot decode it.
+_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def _image_mime(head: bytes) -> str | None:
+    for signature, mime in _IMAGE_SIGNATURES:
+        if head.startswith(signature):
+            return mime
+    if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def task_parts(task: str, images=None):
+    """Build the ``input`` for one turn: the text, then any images.
+
+    Antigravity reads text and image files, and an image can only reach it as
+    a part of the request — "look at this screenshot" is otherwise a task
+    about a file the agent has never seen. Returns the plain string when there
+    are no images, so the common request keeps the shape it always had.
+
+    Audio, video and documents are refused rather than tried: the agent does
+    not read them, so sending one buys a confusing failure.
+    """
+    if not images:
+        return task
+    parts = [{"type": "text", "text": task}]
+    for path in images:
+        try:
+            with open(path, "rb") as fh:
+                raw = fh.read()
+        except OSError as exc:
+            raise ValueError(
+                f"cannot read the image {path}: {exc.strerror}"
+            ) from exc
+        mime = _image_mime(raw[:16])
+        if mime is None:
+            raise ValueError(
+                f"{path} is not an image this agent can read; it accepts "
+                "png, jpeg, gif and webp (audio, video and documents are not "
+                "supported)"
+            )
+        if len(raw) > IMAGE_INPUT_LIMIT_BYTES:
+            raise ValueError(
+                f"{path} is {len(raw)} bytes; this tool caps one input image "
+                "at 20 MB of its own guard, not the service's"
+            )
+        parts.append({
+            "type": "image",
+            "mime_type": mime,
+            "data": base64.b64encode(raw).decode("ascii"),
+        })
+    return parts
 
 
 def worker_contract(*, project: str, repo_dir: str,

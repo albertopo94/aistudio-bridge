@@ -128,9 +128,11 @@ merges the result itself — review the branch, then merge it with your own git.
 | `run "<task>" --repo <url> --reuse-env <id>` | Run in a sandbox you already have, keeping the dependencies an earlier task installed |
 | `run "<task>" --repo <url> --agents-file ./AGENTS.md` | Send your own AGENTS.md where the service reads it (`/.agents/AGENTS.md`) |
 | `run "<task>" --repo <url> --mount-file <local>:<target>` | Place a local text file inside the sandbox (repeatable) — skills, extra norms |
+| `run "<task>" --repo <url> --image shot.png` | Send an image with the task: "look at this screenshot" (repeatable) |
 | `ask "<task>"` | Delegate a NON-code task, get the text back (no repo mounted) |
 | `ask "<task>" --stream` | Same, but print the worker's text live as it is generated |
 | `ask "<task>" --background` | Same, but poll instead of holding one connection open (cannot combine with `--stream`) |
+| `ask "<task>" --image shot.png` | Same, with an image attached (repeatable) |
 | `status [task_id]` | List tasks, or show one (works offline, no key needed) |
 | `status <task_id> --live` | Also ask the service for the task's current status (needs a key) |
 | `continue <task_id>` | Resume a task that reached its budget |
@@ -181,6 +183,33 @@ tier.
 
 Rule of thumb from the skill: if the worker must **edit code in a repo**, use
 `run`; if it only needs to **answer**, use `ask`.
+
+### What each mode can reach
+
+The service treats the `tools` field as a **replacement** for its defaults, not
+an addition — so the tool list a task sends *is* what that task can do, and the
+two modes genuinely differ:
+
+| Tool | `run` | `ask` |
+|---|---|---|
+| `code_execution` | yes | yes |
+| `google_search` | **no** | yes |
+| `url_context` | **no** | yes |
+| your memory tools | yes | yes |
+
+A code worker cannot browse the web. That is deliberate: a task scoped to one
+repository has no reason to fetch arbitrary URLs, and the fewer ways it can
+reach out, the less a persuasive README in that repository can do. If a task
+needs both, send the research as `ask` first and hand the findings to `run`.
+
+### Images
+
+`--image` (repeatable) attaches a png, jpeg, gif or webp to the task, and the
+agent sees it. The type is read from the file's bytes, not its name, so a
+mislabelled file is sent as what it is. Audio, video and documents are refused:
+this agent reads text and image files, and sending it a PDF buys a confusing
+failure. `--image` travels with the turn, not into the sandbox — the file is
+not left on disk there.
 
 ## What travels into the sandbox
 
