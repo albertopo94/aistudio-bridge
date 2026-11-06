@@ -5,6 +5,36 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.18.0] — 2026-11-06
+
+### Added
+
+- `routes` prints every way code can reach the sandbox — `--repo`,
+  `--local-repo`, `--mount-file`, sharded upload, a Cloud Storage source — each
+  with its ceiling, its measured speed, what it needs and whether it works
+  here. It is offline and needs no key, so it can be read before spending any
+  quota. The same rendered table is embedded in the skill and in this README,
+  and a test fails if either drifts: the CLI's error messages, the agent's
+  menu and the docs cannot disagree about the limits (G4/G5 follow-up, S11).
+- A refused upload is now explained instead of reported. The service answers
+  400 "File size exceeds maximum allowed limit" when the account's fair-use
+  window for uploads is spent over a time span, which reads like a property of
+  the file and is not; the message now says it is the window, that retrying
+  later is the fix, and which routes could carry the bytes another way.
+- A sandbox created by an upload attempt that then failed is deleted before
+  the error is raised, so a half-used sandbox does not hold the account for
+  its 7-day life. When the service refuses that deletion the message says so
+  and names `clean --yes`.
+
+### Changed
+
+- **The local 1.5 GiB upload ceiling is gone.** `run --local-repo` no longer
+  refuses a tree for its size. The number was measured once, on fresh quota;
+  the same account later refused 300 MiB at 290 MiB and accepted 20 MiB minutes
+  after, so no local constant can know the limit and the old guard stopped
+  work that the service would have accepted. The service is asked and its
+  refusal is translated. `sync.UPLOAD_LIMIT_BYTES` was removed with it.
+
 ## [0.17.0] — 2026-11-06
 
 ### Added
