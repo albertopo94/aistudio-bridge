@@ -33,6 +33,23 @@ the whole backlog, work unit by work unit, on a feature branch.
   per AGENTS.md §3 (highest category per work unit, bump in its last commit).
 - **S9** Nothing is pushed, merged or applied by the worker; push/PR/merge stay the user's
   decisions (AGENTS.md §5).
+- **S10** (user, verbatim, 2026-11-06) "totalmente deacuerdo con lo que dices de 'traducir
+  el 400 File size exceeds maximum allowed limit a un mensaje que diga lo que es: "la
+  cuenta agotó su fair-use de la ventana; probá más tarde"'.también…" (rest lost to
+  compaction; L26-L27 carry the full agreed design). Acceptance: `run --local-repo` makes
+  **no local size refusal at all** — the service is the only authority on what the account
+  accepts that day; when the service answers 400 "File size exceeds maximum allowed limit"
+  the user reads that the account's fair-use window is exhausted, that retrying later is
+  the action, and which routes remain. Pinned by a test against a fake server that returns
+  that exact 400, and the removal of the old ceiling test is deliberate, not an oversight.
+- **S11** One route table, one source of truth (L27.1). Acceptance: the routes and their
+  measured limits/requirements live in exactly one data module; a CLI command prints that
+  table; the skill text carries the same rows; no second copy of a number exists in code.
+  The CLI stays non-interactive: it prints options, it never asks.
+- **S12** `probe` (L27.2): a cheap live check that answers "can this account upload right
+  now", not an estimate. Acceptance: it uploads ~1 MiB to a scratch environment, deletes
+  the environment on every exit path including failure, reports ok/blocked in one line, and
+  is covered by tests against a fake server (no test touches the network).
 
 ## Tasks
 
@@ -58,6 +75,11 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T18 | S2 | **closed by evidence** — G25 research returns HTTP 429 on the free tier (limit 0 input tokens/min), so it cannot run at all; G26/G29/G30 depend on it | docs(closing) |
 | T19 | closing | docs: mark every gap closed in the plan index; ADR 0001 reminder to the user | docs(closing) |
 | T20 | S8 | inline: G19 — recognise a 429 and explain the no-retry rule (SSE currently loses the HTTP status) | fix(rate-limit) |
+| T21 | S10,S11 | inline, test-first: route table as a data module + `routes` command + the fair-use 400 mapped to an actionable message; delete the fake 1.5 GiB guard | feat(routes) |
+| T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) |
+| T23 | S12 | inline, test-first: `probe` command | feat(probe) |
+| T24 | S11 | **blocked** — live validation of sharded upload before it may be advertised; needs the user's quota OK | — |
+| T25 | S11 | **blocked** — live end-to-end `--local-repo` run + `--delete-env` decision; needs the user's quota OK | — |
 
 ## Log
 
@@ -303,3 +325,24 @@ selector de rutas de subida.
    cuando el usuario quiera meterle bucket.
 5. Pendiente técnica: `on_progress` agregado al `UploadClient` tras
    0022faa; suite completa por correr antes del próximo commit.
+
+**L28** (evidence, 2026-11-06): suite completa **187/187 OK** (`python3 -m unittest
+discover -s tests`, 65s) sobre `a1dca98` — cierra el punto 5 de L27: el callback
+`on_progress` quedó cubierto por la suite entera, no solo por los 13 tests de upload.
+
+**L29** (evidence, medición en vivo pedida por el usuario): `/tmp/g5_timings.py` corrió
+300 MiB y 20 MiB contra la API real (logs `/tmp/g5-timings-300.log`,
+`/tmp/g5-timings-20.log`). Resultado que cambia el diseño:
+- **300 MiB murió a los 290 MiB** con el mismo 400 "File size exceeds maximum allowed
+  limit", y **poco después 20 MiB pasó**. Un techo por archivo no puede explicar eso: la
+  ventana de fair-use de la cuenta es la que manda. `UPLOAD_LIMIT_BYTES = 1530 MiB` es un
+  número falso como guard local (era válido el día de cuota fresca).
+- Throughput impuesto por el servicio **1.06–1.63 MiB/s** (8–13 Mbit/s), no la línea del
+  usuario (51.86 Mbps de subida). `init+first 5.12 s` vs `p50 5.84 s` → sin overhead
+  notable por handshake: la idea de agrandar chunks no gana nada.
+- Fases: payload en memoria 0.1–0.3 s; crear environment 3–6 s; cleanup 1 s; chunk p50
+  ~5.8 s / p95 ~12 s con 10 MiB. Proyecciones útiles: 500 MB ≈ 6 min, 1 GB ≈ 13 min.
+- Consecuencia implementada: S10 (borrar el guard local, mapear el 400) y S11 (tabla de
+  rutas). T24 (shards) sigue bloqueado: el usuario pidió confirmar después de la medición
+  y la medición mostró que los shards **no** resuelven el límite de ventana, solo harían
+  reanudable una subida larga.

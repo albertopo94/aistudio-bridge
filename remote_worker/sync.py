@@ -26,11 +26,10 @@ import tempfile
 #: Documented cap for a ``repository`` source (docs/agent-environment).
 REPOSITORY_SOURCE_LIMIT_BYTES = 500 * 1024 * 1024
 
-#: Measured ceiling of a direct resumable upload into a sandbox (G5 PoC).
-#: 153 chunks of 10 MB (1530 MiB) were accepted and the next chunk returned
-#: 400 "File size exceeds maximum allowed limit", so the guard sits at the
-#: last size the service demonstrably takes rather than at a guessed number.
-UPLOAD_LIMIT_BYTES = 1530 * 1024 * 1024
+# The direct upload route deliberately has NO local ceiling constant here. Its
+# limit is the account's fair-use window over a time span, which no constant
+# can know: 1530 MiB passed on fresh quota and 300 MiB failed hours later. The
+# service decides and remote_worker.routes explains its refusal.
 
 #: Inline sources are capped at 1 MB per file and 2 MB in total by the
 #: environment documentation. Enforcing that here turns a request the service

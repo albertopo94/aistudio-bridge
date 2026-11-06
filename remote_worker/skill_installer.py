@@ -15,6 +15,8 @@ import os
 import shutil
 from pathlib import Path
 
+from .routes import format_routes
+
 SKILL_NAME = "remote-worker"
 DEFAULT_ROOT = os.path.join(os.path.expanduser("~"), ".agents")
 
@@ -94,6 +96,24 @@ Two modes:
 The API key is resolved in order: the `GEMINI_API_KEY` environment
 variable wins, then the stored config in `~/.remote-worker/config.json`
 (written by `remote-worker setup`, 0600). Never print it.
+
+## Getting files into the sandbox
+
+When the task needs a repository, one of these routes carries it. The table
+below is the same one `remote-worker routes` prints, so the numbers here and
+the numbers the CLI reports cannot disagree.
+
+```
+""" + format_routes() + """
+```
+
+How to use it: `--repo` is the default and costs the user nothing in upload
+time. Reach for `--local-repo` only when the repository is not on a host the
+sandbox can see, and warn the user first that the service uploads at ~1.5
+MiB/s and that the account has a fair-use window over time: a refusal with
+"File size exceeds maximum allowed limit" means the window is spent, not that
+the repository is too big, and retrying later is the fix. Offer the other
+routes from the table instead of retrying the same one.
 
 ## Rules
 

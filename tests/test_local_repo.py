@@ -11,8 +11,8 @@ Rules under test:
    untracked-but-not-ignored ones. Ignored build output and `.git` stay home.
 2. A directory that is not a git repository is refused with the reason, before
    anything is sent.
-3. The measured direct-upload ceiling (1.5 GiB, G5) is enforced *before* an
-   environment is created, so an oversized tree costs nothing.
+3. No local size guard exists: the ceiling is the account's fair-use window,
+   so the tree is sent and the service decides (see tests/test_routes.py).
 4. The uploaded archive is unpacked with `extract=true` into
    `workspace/<name>/`, which is the same layout a mounted repository gets, so
    the return path keeps working unchanged.
@@ -202,15 +202,6 @@ class LocalRepoRunTest(unittest.TestCase):
             store=TaskStore(project="proj", root=self._tmp.name),
             workdir=self._tmp.name, poll_interval=0,
         )
-
-    def test_the_ceiling_is_enforced_before_an_environment_exists(self):
-        repo = _make_repo(self._tmp.name)
-        with FakeSandboxServer() as srv:
-            with mock.patch("remote_worker.runner.UPLOAD_LIMIT_BYTES", 10):
-                with self.assertRaises(ValueError) as ctx:
-                    self._runner(srv).run(task="x", local_repo=repo)
-            self.assertEqual(srv.requests, [])
-        self.assertIn("GiB", str(ctx.exception))
 
     def test_upload_extracts_into_workspace_and_runs_there(self):
         repo = _make_repo(self._tmp.name)

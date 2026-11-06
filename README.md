@@ -126,7 +126,7 @@ merges the result itself — review the branch, then merge it with your own git.
 | `run "<task>" --repo <url>` | Delegate one CODE task, bring the diff back |
 | `run "<task>" --repo <url> --background` | Same, but the service runs it and we poll — a dropped connection cannot lose the result |
 | `run "<task>" --repo <url> --reuse-env <id>` | Run in a sandbox you already have, keeping the dependencies an earlier task installed |
-| `run "<task>" --local-repo <path>` | Upload a local working tree (up to 1.5 GiB) instead of cloning a URL |
+| `run "<task>" --local-repo <path>` | Upload a local working tree instead of cloning a URL (see routes below) |
 | `run "<task>" --repo <url> --agents-file ./AGENTS.md` | Send your own AGENTS.md where the service reads it (`/.agents/AGENTS.md`) |
 | `run "<task>" --repo <url> --mount-file <local>:<target>` | Place a local text file inside the sandbox (repeatable) — skills, extra norms |
 | `run "<task>" --repo <url> --image shot.png` | Send an image with the task: "look at this screenshot" (repeatable) |
@@ -140,6 +140,7 @@ merges the result itself — review the branch, then merge it with your own git.
 | `cancel <task_id>` | Stop tracking a task locally, and ask the service to stop it too |
 | `clean` | List the sandboxes your account still holds (deletes nothing) |
 | `clean --yes` | Delete the ones no unfinished task is using |
+| `routes` | Print every way code can reach the sandbox, with measured limits (offline, no key) |
 
 ## Models
 
@@ -261,11 +262,65 @@ Two numbers worth knowing, both measured rather than guessed:
 
 - The sandbox caps a `repository` source at **500 MB**, which is why the upload
   path exists.
-- A direct upload tops out at **1.5 GiB** (1530 MiB uploaded cleanly; the next
-  chunk was refused with "File size exceeds maximum allowed limit"). Above
-  that the tool stops before creating a sandbox and tells you to push the
-  repository to a git host and use `--repo` instead of failing halfway through
-  a long upload.
+- A direct upload is limited by your account's **fair-use window over a time
+  span**, not by a size of the file. Measured on the same account: 1530 MiB
+  accepted on fresh quota; 300 MiB refused at 290 MiB hours later; 20 MiB
+  accepted minutes after that.
+
+So the tool no longer refuses a large tree on its own: the old local guard at
+1.5 GiB was a number that happened to be true on the day it was measured and
+false the same evening. The upload is attempted, and when the service answers
+400 "File size exceeds maximum allowed limit" the tool says what that is — the
+window, not your repository — and which routes remain. The half-used sandbox
+from the failed attempt is released instead of sitting in your account for its
+7-day life.
+
+### Which route gets your code there
+
+`remote-worker routes` prints this table, and it is the same text the tool
+quotes in its own error messages, so the two cannot disagree:
+
+```
+--repo <url>
+    ceiling: 500 MB (documented)
+    speed: cloned by the sandbox itself: no bytes leave your machine
+    needs: the repository on a git host the sandbox can reach
+    status: works
+
+--local-repo <path>
+    ceiling: the account's fair use window at that moment
+    speed: ~1.1-1.6 MiB/s imposed by the service: 500 MB is ~6 min
+    needs: nothing but the API key
+    status: works
+
+--mount-file LOCAL:TARGET
+    ceiling: 1 MB per file, 2 MB in total (documented)
+    speed: seconds, it rides along with the request
+    needs: text files only, listed one by one
+    status: works
+
+the archive split into parts, reassembled in the sandbox
+    ceiling: the same fair use window: splitting does not raise it
+    speed: the same per-byte rate, plus one turn to reassemble
+    needs: an extra sandbox turn to concatenate and unpack the parts; Google does not document this route, so it is unproven
+    status: not validated live
+
+a Cloud Storage bucket as the environment source
+    ceiling: 2 GB (documented)
+    speed: ~5 min for 1.5 GiB on a 51 Mbps uplink
+    needs: your own GCP project, bucket and gsutil; the transport differs, so it is the route that escapes the upload window
+    status: not implemented here
+```
+
+The last two rows are listed because they are real options to weigh, not
+because this tool can run them: `shards` has never been validated against the
+service and `gcs-source` needs a bucket of your own. Neither is offered as an
+alternative in an error message.
+
+The service, not your connection, sets the pace: measured 1.1-1.6 MiB/s against
+a machine with a 51.86 Mbps uplink. Splitting an archive into parts does not
+raise the window, it would only make a long upload resumable — which is why it
+is not built yet.
 
 ## Limits worth knowing
 

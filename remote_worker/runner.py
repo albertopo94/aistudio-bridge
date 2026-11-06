@@ -19,12 +19,13 @@ from .function_loop import (RUNNING_STATUSES, WatchLimitExceeded,
                             run_until_complete, wait_until_done)
 from .google_client import (EnvironmentsClient, FilesClient,
                             InteractionsClient, InteractionsError,
-                            InteractionsTimeoutError, UploadClient)
+                            InteractionsTimeoutError, UploadClient, UploadError)
 from .planner import (agent_config, network_config, task_parts,
                       worker_contract)
+from .routes import upload_failure_message
 from .state import DEFAULT_ROOT, TaskStore, _slug
 from .sync import (apply_to_branch, archive_repo, inline_source, mount_repo,
-                   run_tests, INLINE_TOTAL_LIMIT_BYTES, UPLOAD_LIMIT_BYTES)
+                   run_tests, INLINE_TOTAL_LIMIT_BYTES)
 
 AGENT = "antigravity-preview-09-2026"
 DEFAULT_TEST_COMMAND = ["python3", "tests/test_main.py"]
@@ -112,37 +113,42 @@ class TaskRunner:
                            sources: list, network, task_id: str) -> dict:
         """Send a local working tree into a fresh sandbox (G4).
 
-        The tree is archived, measured against the ceiling this project
-        measured with the G5 PoC, and uploaded with ``extract=true`` into
-        ``/workspace/<name>/`` so the sandbox sees exactly the layout a
-        mounted repository would have given it.
+        The tree is archived and uploaded with ``extract=true`` into
+        ``/workspace/<name>/``, the layout a mounted repository would have
+        given the sandbox, so the return path is the same either way.
+
+        Nothing here refuses the archive for being large. The ceiling is the
+        account's fair-use window over a time span, which no local constant
+        can know (see :mod:`remote_worker.routes`), so the service is asked and
+        its refusal is translated instead.
         """
         os.makedirs(self.workdir, exist_ok=True)
         archive_path = os.path.join(self.workdir, f"{task_id}.tar.gz")
+        environment_id = None
         try:
             archive = archive_repo(local_repo, archive_path)
-            if archive["bytes"] > UPLOAD_LIMIT_BYTES:
-                size_gib = archive["bytes"] / (1024 ** 3)
-                limit_gib = UPLOAD_LIMIT_BYTES / (1024 ** 3)
-                raise ValueError(
-                    f"this repository archives to {size_gib:.2f} GiB, above "
-                    f"the {limit_gib:.2f} GiB ceiling a sandbox accepts for "
-                    "an upload (measured with the G5 benchmark). Sharded "
-                    "upload is not implemented yet, so there is no route for "
-                    "it from this tool."
-                )
             environment = self.environments.create_environment(
                 sources=sources, network=network,
             )
             environment_id = environment.get("id")
             if not environment_id:
                 raise ValueError("the service did not return an environment id")
-            self.uploads.upload_file(
-                environment_id=environment_id,
-                path=f"workspace/{repo_name}/",
-                file_path=archive_path,
-                extract=True,
-            )
+            try:
+                self.uploads.upload_file(
+                    environment_id=environment_id,
+                    path=f"workspace/{repo_name}/",
+                    file_path=archive_path,
+                    extract=True,
+                )
+            except UploadError as exc:
+                # A sandbox holding a half-uploaded archive is of no use to
+                # anyone, and it would sit there for the 7-day TTL. Release the
+                # one this attempt made, then explain the refusal.
+                released = self._release_environment(environment_id)
+                raise ValueError(
+                    upload_failure_message(exc.status, exc.body, environment_id,
+                                           released=released)
+                ) from exc
         finally:
             # The archive is as big as the repository. Leaving it behind would
             # quietly cost the user a second copy of their tree per task.
@@ -150,6 +156,14 @@ class TaskRunner:
                 os.remove(archive_path)
         return {"id": environment_id, "archive_bytes": archive["bytes"],
                 "archive_files": archive["files"]}
+
+    def _release_environment(self, environment_id: str) -> bool:
+        """Best-effort delete of a sandbox this attempt made and cannot use."""
+        try:
+            self.environments.delete_environment(environment_id)
+        except Exception:
+            return False
+        return True
 
     def run(self, *, task: str, repo_url: str | None = None,
             model: str | None = None,

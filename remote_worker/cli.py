@@ -11,6 +11,7 @@ import os
 import sys
 
 from . import planner
+from . import routes
 from .google_client import InteractionsError
 
 VERSION_PATH = os.path.join(
@@ -104,6 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="actually delete them; without this flag nothing "
                             "is removed")
 
+    sub.add_parser(
+        "routes", help="print every way code can reach the sandbox, with "
+                       "measured limits, so you can pick one")
+
     ask = sub.add_parser("ask", help="delegate a non-code task, get the text")
     ask.add_argument("task", help="the task, in plain language")
     ask.add_argument("--model", default=None,
@@ -146,6 +151,12 @@ def main(argv=None, *, runner=None) -> int:
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
+        return 0
+
+    if args.command == "routes":
+        # Offline on purpose: the table is what you read to decide whether to
+        # spend quota at all, so reading it must never need a key or a call.
+        print(routes.format_routes())
         return 0
 
     if runner is None:
