@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.22.2] — 2026-11-07
+
+### Changed
+
+- Docs only: the T11/G23 disposition is recorded (a skill reaching the
+  sandbox works via `--mount-file LOCAL:TARGET`, so no dedicated `--skill`
+  flag), the session decisions for the remaining items are logged in the
+  feature doc (GCS route approved to build; live quota OK for T24/T25),
+  and the plan's open-items line no longer presents the download ceiling as
+  unmeasured (T27 measured it in v0.22.0). No code touched.
+
 ## [0.22.1] — 2026-11-07
 
 ### Fixed
