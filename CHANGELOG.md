@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.22.3] — 2026-11-07
+
+### Fixed
+
+- `clean` no longer offers the sandbox of an unfinished task in another
+  project for deletion. The service's environment list is account-wide
+  (the Environments API has no per-project scope), but the protection set
+  only read the project the CLI was run from, so `clean --yes` from one
+  project could delete a live sandbox owned by an active task in another.
+  The protection now spans every local project store under the state
+  root, so unfinished work is never offered for deletion no matter which
+  project the CLI runs from (F2).
+
 ## [0.22.2] — 2026-11-07
 
 ### Changed
