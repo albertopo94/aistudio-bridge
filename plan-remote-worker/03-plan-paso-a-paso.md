@@ -146,7 +146,8 @@ diff y tests.
   rechazado con rc 2 y los modelos permitidos listados.
 
 **Aceptación cumplida.** Pendiente de firma humana (AGENTS.md §9): la ADR
-`docs/adr/0001-standalone-product.md`, que **redacta el humano**, no el agente.
+`docs/adr/0001-standalone-product.md` — borrador preparado por el agente para
+revisión (2026-11-07); la decisión y la firma son del humano.
 
 ## Fase 2 (después del 0.6.0, decisiones separadas)
 - **Streaming SSE** (`?alt=sse`) para feedback en vivo.
