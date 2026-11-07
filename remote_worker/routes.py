@@ -20,9 +20,10 @@ the options, the human decides.
 ``RETURN_ROUTES`` is the same treatment for the trip back (S13). It is shorter
 than the upload table because a sandbox is a filesystem with no memory of how
 it was filled: one transport, several granularities, and one route closed on
-purpose. Its ceilings say **not measured** because nobody measured them, and
-an invented number there would be the same failure class as the deleted
-1.5 GiB constant (S14).
+purpose. Its ceilings carry what was measured on 2026-11-07 against a sandbox
+holding 3.6 GiB; where nothing was measured the cell says **not measured**
+rather than guessing, the same rule that killed the invented 1.5 GiB upload
+constant (S14).
 """
 
 from __future__ import annotations
@@ -43,11 +44,21 @@ STATUS_REFUSED = "refused by design"
 #: How recently the numbers below were measured, so a reader knows whether to
 #: trust them or re-run the probe.
 MEASURED_ON = "2026-11-06"
-
 #: The wording the service uses when the account's upload window is spent.
 #: Captured live, verbatim, twice (poc/g5_upload_ceiling.sh and the 300 MiB
 #: run in /tmp/g5-timings-300.log).
 SIZE_LIMIT_MARKER = "exceeds maximum allowed limit"
+
+#: The day the return path was measured against the real service, and what
+#: the measurement was: a sandbox holding 3.6 GiB, produced by one cheap task
+#: turn (the bytes were generated inside the sandbox, so no upload window was
+#: spent). Single file: 100 MiB in 56.6s, 500 MiB in 253.4s, 1 GiB in 348.9s
+#: (~2-3 MiB/s) -- then 2 GiB refused with 504 deadline_exceeded at 121.8s.
+#: Recursive tar: 1 GiB refused 504 at 121.6s, 3.6 GiB refused 500 at 123.0s.
+#: Both failures landed at ~122 s whatever the payload, so the service gives
+#: up on time, not on size -- which is why no number above the largest
+#: measured pass may be extrapolated (S14).
+RETURN_MEASURED_ON = "2026-11-07"
 
 
 class Route(NamedTuple):
@@ -120,27 +131,40 @@ RETURN_ROUTES = (
     Route(
         id="workspace-archive",
         how="the whole workspace as one tar (what `run` does every time)",
-        ceiling="not measured: no ceiling is documented and none was observed",
-        speed="one request, whatever the size; the tar is read into memory",
+        # Measured 2026-11-07. The route itself works and carries every `run`
+        # -- that is proven by every workspace this tool has ever brought back.
+        # What is NOT proven above a few hundred kilobytes is its ceiling: a
+        # 1 GiB tar and a 3.6 GiB workspace both failed at ~122 s. The status
+        # stays `works` because the route does; the ceiling cell is where the
+        # doubt belongs, and it does not guess a line nobody measured.
+        ceiling="proven small; a 1 GiB tar and a 3.6 GiB workspace both "
+                "failed at ~122 s (504/500), so the ceiling is under 1 GiB "
+                "and nobody knows where",
+        speed="~2-3 MiB/s while it works; it stops at a service deadline, "
+              "not at a size the service ever named",
         needs="a task that mounted a workspace, and a sandbox inside its "
-              "7-day life",
+              "7-day life. When the tar fails the bytes stay in the sandbox "
+              "and come back one at a time with --path",
         status=STATUS_WORKS,
     ),
     Route(
         id="workspace-listing",
         how="remote-worker fetch <task> --list [--path DIR]",
-        ceiling="not measured: how many entries one call returns was never "
-                "observed",
-        speed="metadata only: no file content moves",
+        ceiling="at least 62 entries in one call (measured); no ceiling was "
+                "found and none is documented",
+        speed="metadata only: no file content moves, 1.7s for 4 entries",
         needs="the environment id of a task this tool recorded",
         status=STATUS_WORKS,
     ),
     Route(
         id="single-file",
         how="remote-worker fetch <task> --path FILE [--out DEST]",
-        ceiling="not measured: the size one file may come back at was never "
-                "observed",
-        speed="one request for that file alone",
+        # 1 GiB came back whole in 348.9s; 2 GiB was refused at 121.8s with
+        # 504 deadline_exceeded. The gap between them is not measured, so the
+        # cell names what passed and what did not instead of inventing a line.
+        ceiling="1 GiB passed; 2 GiB was refused (504 deadline_exceeded); "
+                "what lies between them is not measured",
+        speed="~1.8-2.9 MiB/s measured from 100 MiB to 1 GiB",
         needs="the path as `--list` printed it; an existing local file needs "
               "--overwrite",
         status=STATUS_WORKS,

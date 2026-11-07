@@ -83,18 +83,33 @@ class ReturnRouteTableTest(unittest.TestCase):
                 code = cli.main(["routes"], runner=None)
         self.assertEqual(code, 0, out.getvalue())
 
-    # Rule 2: the unmeasured ceiling stays unmeasured.
-    def test_the_download_ceiling_says_not_measured_instead_of_guessing(self):
-        rendered = routes.format_return_routes()
-        self.assertIn("not measured", rendered)
+    # Rule 2 (superseded by measurement, 2026-11-07): S14 never meant "no
+    # numbers", it meant "no invented numbers". The return path was measured
+    # against the real service (a sandbox holding 3.6 GiB; the log has the
+    # times). What the rule still forbids is a size that is neither a measured
+    # pass, a measured refusal, nor a stated non-measurement.
+    def test_every_stated_size_is_a_measured_one(self):
+        # The measured passes and the measured refusals, from the live runs.
+        allowed_sizes = {"1 GiB", "2 GiB", "3.6 GiB", "100 MiB", "500 MiB"}
         for row in routes.RETURN_ROUTES:
             if row.id == "push-to-git-host":
                 continue
-            self.assertRegex(row.ceiling.lower(), r"not measured",
-                             f"{row.id} states a ceiling nobody measured")
-            self.assertFalse(
-                re.search(r"\d+(\.\d+)?\s*(GiB|MiB|KiB|GB|MB|KB)", row.ceiling),
-                f"{row.id} invented a size: {row.ceiling}")
+            stated = re.findall(r"\d+(?:\.\d+)?\s*(?:GiB|MiB|KiB|GB|MB|KB)",
+                                row.ceiling)
+            for size in stated:
+                self.assertIn(size, allowed_sizes,
+                              f"{row.id} states an unmeasured size: {size}")
+            if not stated:
+                self.assertRegex(
+                    row.ceiling.lower(), r"not measured|no ceiling",
+                    f"{row.id} states neither a measured size nor its absence")
+
+    def test_the_measured_cells_name_the_failure_that_proved_them(self):
+        """A ceiling without the service's own refusal is a guess with units."""
+        by_id = routes.return_routes_by_id()
+        self.assertIn("504", by_id["single-file"].ceiling)
+        self.assertIn("not measured", by_id["single-file"].ceiling)
+        self.assertIn("504", by_id["workspace-archive"].ceiling)
 
     # Rule 3: the rejection is stated, with its reason.
     def test_the_git_host_route_is_refused_and_says_why(self):

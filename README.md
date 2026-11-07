@@ -363,20 +363,20 @@ one:
 
 ```
 the whole workspace as one tar (what `run` does every time)
-    ceiling: not measured: no ceiling is documented and none was observed
-    speed: one request, whatever the size; the tar is read into memory
-    needs: a task that mounted a workspace, and a sandbox inside its 7-day life
+    ceiling: proven small; a 1 GiB tar and a 3.6 GiB workspace both failed at ~122 s (504/500), so the ceiling is under 1 GiB and nobody knows where
+    speed: ~2-3 MiB/s while it works; it stops at a service deadline, not at a size the service ever named
+    needs: a task that mounted a workspace, and a sandbox inside its 7-day life. When the tar fails the bytes stay in the sandbox and come back one at a time with --path
     status: works
 
 remote-worker fetch <task> --list [--path DIR]
-    ceiling: not measured: how many entries one call returns was never observed
-    speed: metadata only: no file content moves
+    ceiling: at least 62 entries in one call (measured); no ceiling was found and none is documented
+    speed: metadata only: no file content moves, 1.7s for 4 entries
     needs: the environment id of a task this tool recorded
     status: works
 
 remote-worker fetch <task> --path FILE [--out DEST]
-    ceiling: not measured: the size one file may come back at was never observed
-    speed: one request for that file alone
+    ceiling: 1 GiB passed; 2 GiB was refused (504 deadline_exceeded); what lies between them is not measured
+    speed: ~1.8-2.9 MiB/s measured from 100 MiB to 1 GiB
     needs: the path as `--list` printed it; an existing local file needs --overwrite
     status: works
 
@@ -401,15 +401,33 @@ A listing moves metadata only, and neither command creates an interaction:
 reading bytes back is not a task, so it spends no task quota. A file lands in
 the current directory unless you say `--out`, and an existing local file is
 never replaced unless you say `--overwrite` — this is the one read that could
-damage your tree. If the sandbox already expired (7-day TTL) the read says so
-and exits `3`: those bytes are gone, and a new run is the only way back.
+damage your tree. A 404 is told apart by cause, because the service answers the
+same 404 for two different things: a path that is not there prints `no such
+path` with what the sandbox does hold and exits `2`; a sandbox that really
+expired (7-day TTL) says so and exits `3` — those bytes are gone, and only a
+new run brings them back.
 
-Three ceilings in that table say **not measured**, and they are not lazy
-placeholders. No download ceiling is documented and none has been observed, so
-writing a number there would repeat the mistake of the 1.5 GiB upload constant
-— a figure that was true on the day it was measured and false the same evening.
-Measuring them honestly needs a large tree inside a sandbox first, which costs
-upload window or task quota; the cheap version only proves the small case.
+The sizes in that table were measured on 2026-11-07 against a sandbox holding
+3.6 GiB — files generated **inside** the sandbox by one cheap task turn, so the
+measurement spent no upload window. They are the service's behaviour, not a
+clean limit the service ever published:
+
+- **One file came back whole at 1 GiB** in 348.9 s (~2.9 MiB/s); 2 GiB was
+  refused with `504 deadline_exceeded` at 121.8 s. Where between 1 and 2 GiB
+  the line sits was not measured, and the table says so rather than guessing.
+- **The tar — the route `run` itself uses — died at 1 GiB** with the same 504,
+  and a 3.6 GiB workspace died at ~123 s with a 500. Every workspace this tool
+  has ever brought back was a few hundred KB, which is why this went unnoticed:
+  a `run` whose agent generates big artifacts (datasets, models, build output)
+  can spend its tokens, complete its task, and then fail at the last step with
+  the service's raw error while the bytes stay reachable in the sandbox.
+- Both failures landed at **~122 s whatever the payload**, so it is a deadline
+  in time, not a cap in bytes — which is also why you cannot extrapolate
+  upward from the measured rates.
+
+When a run's tar fails, nothing is lost: the sandbox keeps everything for its
+7-day life, and `fetch --list` + `fetch --path` bring it back file by file
+under the 1 GiB single-file ceiling.
 
 The last row is a route this tool refuses, stated with its reason instead of
 left as a surprise. "Can't Google just push the result to my GitHub?" is the

@@ -96,7 +96,7 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T24 | S11 | **blocked** — live validation of sharded upload before it may be advertised; needs the user's quota OK | — |
 | T25 | S11 | **blocked** — live end-to-end `--local-repo` run + `--delete-env` decision; needs the user's quota OK | — |
 | T26 | S13,S14 | inline, test-first: the return path as a data table; expose `list`/fetch-one-file from the CLI (the client already has both); document the GitHub rejection and the unmeasured ceiling | feat(fetch) 3a71cac + v0.21.0 |
-| T27 | S14 | **blocked** — measure the download ceiling live; needs the user's quota OK, and the honest variant costs more than the cheap one (L35) | — |
+| T27 | S14 | **DONE** — measured live 2026-11-07 with user quota OK: bytes generated INSIDE the sandbox (zero upload window), single-file 1 GiB pass / 2 GiB 504, tar 1 GiB 504 / 3.6 GiB 500, ~122 s deadline; measured numbers replaced the three `not measured` cells. Bonus defect found and fixed by the same live pass: `--list` read the wrong size field (`sizeBytes` vs the real `size_bytes`), and a wrong path in a live sandbox was reported as sandbox expiry | feat(return-measured) + fix(size-field) + fix(404-cause) |
 
 ## Log
 
@@ -551,11 +551,24 @@ en estas líneas y nada se aplasta.
 | 10 | `probe` (ventana de subida medida en 1 s) | T23 · 25461f9, dfc60b4 | 0.20.0 |
 | 11 | trazabilidad tarea→commit en este doc | ed41223 | 0.20.1 |
 | 12 | S13+S14 tabla de bajada + `fetch` + rechazo de push documentado | T26 · 3a71cac, fc874ac, db3d3fe | 0.21.0 |
+| 13 | T19: el índice del plan dice la verdad (G1-G30 por cómo cerró) + 2 claims podridos corregidos | T19 · 9f97287, 21f69f4 | 0.21.1 |
+| 14 | fix `fetch`: campo de tamaño real (`size_bytes`) + causalidad del 404 (path vs expirado) | L40 · ee7b0e1, 0252556 | 0.21.2 |
+| 15 | T27: techo de bajada medido en vivo; celdas `not measured` reemplazadas por números con su error | T27 · (feat) + bump | 0.22.0 |
 
-Lo que queda abierto después del slice 12, con su dueño: **T24** (validar shards en
-vivo), **T25** (`--local-repo` end-to-end en vivo + decisión `--delete-env`) y
-**T27** (medir el techo de bajada). Los tres gastan la cuota del usuario y esperan
-su OK; ninguno se ofrece como ruta disponible hasta tener prueba en vivo.
+Lo que queda abierto después del slice 15, con su dueño: **T24** (validar shards
+en vivo) y **T25** (`--local-repo` end-to-end en vivo + decisión `--delete-env`).
+Ambos gastan la cuota del usuario y esperan su OK; ninguno se ofrece como ruta
+disponible hasta tener prueba en vivo.
+
+**F1 (defecto nuevo, encontrado midiendo T27, dueño `run`):** cuando la bajada
+del tar falla (tar > ~1 GiB, o un workspace que el agente llenó de artefactos),
+la tarea ya quedó grabada `completed` con reporte y tokens, el branch nunca se
+crea, y el CLI escupe el 500/504 crudo del servicio. Estado y entrega
+discrepan: `completed` sin resultado entregable. Arreglo sugerido (no hecho):
+grabar la tarea como completada-sin-entregar cuando `download_to` falla, con el
+camino de recuperación impreso (`fetch --list` / `--path`), y salida dedicada.
+Evidencia: corrida t_1794045414 (3.6 GiB), 93.446 tokens, `status: completed`,
+branch `worker/t27-download-ceiling` inexistente.
 
 - **L38** (evidence) T19 done. The task read "the gap index still shows every G1-G30
   row in its original 'to do' wording", and that was true: the index sorted gaps by
@@ -576,3 +589,37 @@ su OK; ninguno se ofrece como ruta disponible hasta tener prueba en vivo.
   that and names the missing live run instead of claiming it. `Estado` section updated
   (v0.21.0, 42 commits, the real command list, 230 tests). No code touched: suite 230/230
   before and after, and docs-only means PATCH per AGENTS.md §3.
+
+- **L39** (evidence) T27 measured, with the user's explicit quota OK. The method
+  dodged the cost that had blocked it: instead of uploading a big tree (spending
+  the fair-use window), one cheap `--background` flash task was asked to `dd`
+  four files (100/500/1000/2000 MiB) into /workspace/bigfiles inside the sandbox.
+  The task turn died at the very end — service HTTP 500 — but the sandbox kept
+  the 3.6 GiB, so the measurement ran entirely on free reads. Numbers, all
+  against the tool's own transport: single file 100 MiB/56.6s, 500 MiB/253.4s,
+  1 GiB/348.9s (~1.8-2.9 MiB/s, bytes verified equal to declared); 2 GiB refused
+  504 deadline_exceeded at 121.8s (reproduced twice, harness timeout ruled out
+  by a 3600s client). Recursive tar: 1 GiB 504 at 121.6s, 3.6 GiB 500 at 123.0s.
+  Every failure lands at ~122s whatever the payload: a deadline in TIME, not a
+  cap in bytes, so the table names pass/refuse pairs and what stays unmeasured
+  instead of inventing a line (S14). The root cause of the 500 that killed the
+  task turned out to be the same 3.6 GiB tar: the task recorded `completed` with
+  a full report (93k tokens), but the branch never appeared because the failure
+  happened in the return download AFTER recording. That is a real defect (state
+  says completed, delivery did not happen; the raw 500 escapes the CLI) recorded
+  here as follow-up F1, owned by `run`, not by this table.
+- **L40** (evidence) the same live pass found two defects in `fetch` and both
+  went test-first. (1) The listing reader asked for `sizeBytes`; the service
+  answers `size_bytes` (verified over 12 live environments) — so `--list` never
+  printed a single size, and the test fixture had invented the same wrong name,
+  green over a broken command. RED observed with the real shape (no size line
+  printed), fixture corrected, reader now takes size_bytes first; a DIRECTORY
+  entry prints no size because it has none. (2) A 404 from the files endpoint
+  means "path not found" OR "sandbox expired" and the bodies are identical
+  (both shapes captured live, same account, one dead + one live environment);
+  the reader always said expired, sending users to re-run tasks whose sandboxes
+  were fine. Now the root listing (free, metadata) tells them apart: live+empty
+  = expired (exit 3, unchanged), live+entries = `no such path` + what exists
+  one level down + exit 2, unreadable root = refuse to guess. Fake server
+  learned both live shapes, including that a dead sandbox does NOT 404 at root
+  (200 with nothing inside). Suite after: see commit.
