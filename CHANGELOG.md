@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.23.1] — 2026-11-07
+
+### Changed
+
+- The sharded-upload route is no longer advertised as unproven: the PoC
+  (poc/t24_shards.py) ran it live against the real service and the tree
+  came back byte-identical (L48). The routes table and the README now
+  say "proven live in the PoC, not implemented here" with the run's
+  numbers, and the route stays out of the alternatives an error
+  message offers.
+
 ## [0.23.0] — 2026-11-07
 
 ### Added
