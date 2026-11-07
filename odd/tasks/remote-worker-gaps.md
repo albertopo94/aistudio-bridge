@@ -94,7 +94,7 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) e3b4ca7 + v0.19.0 622d3a2 |
 | T23 | S12 | inline, test-first: `probe` command | feat(probe) 25461f9 + v0.20.0 dfc60b4 |
 | T24 | S11 | **quota OK (L42)** — live validation of sharded upload before it may be advertised; standing recommendation on skip stands, the user chose to run it | — |
-| T25 | S11 | **quota OK (L42)** — live end-to-end `--local-repo` run; the `--delete-env` decision stays the user's (L42) | — |
+| T25 | S11 | **DONE live (L44-L47)** — `--local-repo` end-to-end proven on the real service: archive→upload→agent turn→tar→branch on a clone of the RIGHT repo (task t_1794074888, 87k/34k tokens across attempts); `--delete-env` implemented (opt-in, only after a verified delivery) with the ask observed live | fix + feat 0.23.0 |
 | T26 | S13,S14 | inline, test-first: the return path as a data table; expose `list`/fetch-one-file from the CLI (the client already has both); document the GitHub rejection and the unmeasured ceiling | feat(fetch) 3a71cac + v0.21.0 |
 | T27 | S14 | **DONE** — measured live 2026-11-07 with user quota OK: bytes generated INSIDE the sandbox (zero upload window), single-file 1 GiB pass / 2 GiB 504, tar 1 GiB 504 / 3.6 GiB 500, ~122 s deadline; measured numbers replaced the three `not measured` cells. Bonus defect found and fixed by the same live pass: `--list` read the wrong size field (`sizeBytes` vs the real `size_bytes`), and a wrong path in a live sandbox was reported as sandbox expiry | feat(return-measured) + fix(size-field) + fix(404-cause) |
 
@@ -557,13 +557,20 @@ en estas líneas y nada se aplasta.
 | 16 | F1: tarea grabada `completed` aunque la bajada falló → estado `undelivered` + `clean` la protege + `continue` la rechaza + CLI imprime la recuperación | L41 · (fix) + bump | 0.22.1 |
 | 17 | T11/G23 cerrado como cubierto (docs) + decisiones de sesión (GCS aprobado para construir, OK cuota T24/T25) + la línea "Sigue abierto" del plan deja de presentar a T27 como sin medir | L42 · docs + bump | 0.22.2 |
 | 18 | F2: la protección de `clean` abarca TODAS las cuentas locales (cross-project) + corrección del claim falso en L41 | L43 · fix + bump | 0.22.3 |
+| 19 | Dos defectos del primer run en vivo de T25: el shape del `environment` en las rutas por id (L44) y el clone viejo que absorbía deliveries ajenos (L45) | L44, L45 · fix + bump | 0.22.5 |
+| 20 | `--delete-env`: borra el sandbox solo tras delivery verificado, y si no se pasa el flag, la pregunta (TTY) o el comando (agente) | L46 · feat + bump | 0.23.0 |
 
-Lo que queda abierto, con su dueño (estado al L42): **T24** (validar shards en
-vivo) y **T25** (`--local-repo` end-to-end en vivo; la decisión `--delete-env`
-sigue siendo del usuario) — ambos con OK de cuota (L42), pendientes de
-ejecución; **gcs-source** aprobada para construir (L42: requiere el proyecto
-GCP + bucket del usuario); **ADR 0001** sigue pendiente del usuario
-(AGENTS.md §9). Ninguna ruta sin prueba en vivo se anuncia como disponible.
+**Corte de review (L47):** los commits hasta `437cb9f` (0.22.1 → 0.22.5,
+T11/G23 + F2 + los dos defectos de T25) son la slice A; `--delete-env` y lo
+que siga (T24, GCS) abre la slice B. Si algún día se abre PR, se corta ahí.
+
+Lo que queda abierto, con su dueño (estado al L47): **T24** (validar shards en
+vivo) — OK de cuota (L42), pendiente de ejecución; **gcs-source** aprobada
+para construir (L42: requiere el proyecto GCP + bucket del usuario, y el
+setup se documenta para cualquier usuario que no lo tenga); **ADR 0001**
+tiene borrador en `docs/adr/` pendiente de la firma del usuario
+(AGENTS.md §9). T25 quedó cerrado en vivo (L47) y ninguna ruta sin prueba en
+vivo se anuncia como disponible.
 
 **F1 (defecto nuevo, encontrado midiendo T27, dueño `run`):** cuando la bajada
 del tar falla (tar > ~1 GiB, o un workspace que el agente llenó de artefactos),
@@ -703,3 +710,61 @@ real + clone real). Suite 239/239.
   (`list_project_stores` in state.py), so unfinished work is never offered
   for deletion no matter which project the CLI runs from. This is what
   makes the cleanup safe to run. Suite 241/241.
+
+- **L44** (defect) T25, second live attempt, after the storage quota was
+  freed (L43): the upload worked, then the service answered 400 "Provide a
+  'type' field (for EnvironmentConfig) at 'environment'". The API reference
+  showed the root cause: the interaction's `environment` field takes a
+  string (an environment id) or an `EnvironmentConfig` whose `type` is
+  required (value `remote`); `--local-repo` sent a bare `{"id": ...}`
+  object and `--reuse-env` sent `{"id": ..., "sources": ...}`. Neither form
+  exists in the reference. `--local-repo` had never been run live (that is
+  what T25 is for) and the fake accepted any shape, so the suite was green
+  over a broken command -- the L40 lesson again. FIX (test-first, commit
+  33f53d0): `--local-repo` passes the id string; `--reuse-env` uses the
+  documented `{type: remote, environment_id, sources}` form, which updates
+  the sandbox instead of creating one; the fake now answers the exact 400
+  for an object without `type`. Suite 241/241.
+
+- **L45** (defect) T25, third live attempt (with L44 fixed): the run
+  completed and exited 0, but the branch landed in a clone of a DIFFERENT
+  repository. `apply_to_branch` (sync.py) cloned only when the clone
+  directory had no `.git`, and the clone path is fixed per project: the
+  worker-poc-toy clone from the PoC era was still there, so the delivery
+  was checked out on ITS history and overlaid, while the real repository
+  (the scratch path) never received a branch. The tests never caught it
+  because every test starts with a fresh tempdir workdir. FIX (test-first,
+  StaleCloneTest): the clone is used only when its origin is that exact
+  repository; otherwise the old clone is kept under a dated backup name
+  (it may hold a branch nobody merged yet) and the right one is cloned.
+  Live evidence: the run's output named `.../work/clone` with branches
+  `worker/worker-poc-toy-*`, and the scratch repo had no `worker/t25-e2e`.
+  Suite 249/249.
+
+- **L46** (feat) `--delete-env` (T25's product decision, L42): the user
+  wants the tool to ask, and would delete whenever the repo is up to date
+  locally (delivered) or on GitHub. Implemented as: `--delete-env` deletes
+  the sandbox only after a VERIFIED delivery, and never on `undelivered`
+  (the sandbox is then the only copy); without the flag, a delivered run
+  offers the question -- in a terminal it asks `[y/N]` with keep as the
+  default, and when an agent drives the CLI it prints the same question
+  with the `clean` command. A failed delete is reported and does not turn
+  a delivered run into a failure. README documents the flag and the
+  question. Tests: tests/test_delete_env.py (6 rules).
+
+- **L47** (evidence) T25 proven live end-to-end, 4th attempt (the first with
+  both fixes). Scratch repo `/tmp/t25-e2e.Wz9Fdg` (`pkg/ledger.py` +
+  README, no tests) archived and uploaded (696 B); task t_1794074888 ran in
+  the sandbox (34,074 tokens, status `completed`); the workspace tar came
+  back and landed on branch `worker/t25-e2e` of a clone whose origin is the
+  scratch repo (`/tmp/t25-e2e.Wz9Fdg`) -- F3's fix in the real world. The
+  staged diff is exactly the task: one-line docstrings on every function of
+  `pkg/ledger.py`, bodies untouched (changes are staged, not committed, so
+  the user reviews before merging -- that is the design: git truth never
+  leaves the machine and the scratch repo itself stays untouched). The CLI
+  also printed the sandbox question (`sandbox 37c5130a... is kept for 7
+days; to release finished sandboxes: remote-worker clean`), which is
+  --delete-env's asked form observed live. The exit code was 1 only because
+  the fixture repo has no `tests/test_main.py` (the fixed DEFAULT_TEST_COMMAND
+  the worker contract names); on a repo with tests the CLI reports their
+  result (L46). T25 is DONE.

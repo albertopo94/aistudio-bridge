@@ -129,6 +129,7 @@ merges the result itself — review the branch, then merge it with your own git.
 | `run "<task>" --local-repo <path>` | Upload a local working tree instead of cloning a URL (see routes below) |
 | `run "<task>" --repo <url> --agents-file ./AGENTS.md` | Send your own AGENTS.md where the service reads it (`/.agents/AGENTS.md`) |
 | `run "<task>" --repo <url> --mount-file <local>:<target>` | Place a local text file inside the sandbox (repeatable) — skills, extra norms |
+| `run "<task>" --repo <url> --delete-env` | Delete the sandbox once the delivery is verified (`--local-repo` works too; a failed delivery always keeps it) |
 | `run "<task>" --repo <url> --image shot.png` | Send an image with the task: "look at this screenshot" (repeatable) |
 | `ask "<task>"` | Delegate a NON-code task, get the text back (no repo mounted) |
 | `ask "<task>" --stream` | Same, but print the worker's text live as it is generated |
@@ -244,6 +245,14 @@ be text — the tool checks both before sending anything.
 `--reuse-env <environment_id>` runs the task in a sandbox you already have, so
 dependencies an earlier task installed are still there. `clean` prints the ids
 you hold. The task's repository is still mounted into it.
+
+Every finished sandbox lives 7 days unless you say otherwise. After a
+delivered run the tool names it and asks whether to delete it — in a terminal
+it prompts `[y/N]` (keep is the default); when an agent drives the CLI it
+prints the same question with `remote-worker clean`. `--delete-env` answers
+"yes" before the run: the sandbox is deleted as soon as the delivery is
+verified. A failed delivery never deletes it — the sandbox is then the only
+copy of the work.
 
 ### A repository that only exists on your machine
 

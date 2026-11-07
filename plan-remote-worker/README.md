@@ -50,7 +50,7 @@ como branch con diff verificable.
 - Producto: **v0.21.0** sobre la rama `feat/gaps-backlog` (42 commits sobre
   `main`, sin fusionar: abrir PR y mergeo son decisión del humano, AGENTS.md §5).
   - Setup interactivo con API key guardada en `~/.remote-worker/config.json` (0600), sin `.env` ni exports obligatorios.
-  - Comandos: `setup` (con `--install-skill`, `--list-skill-backups`, `--restore-skill`), `run` (con `--local-repo`, `--reuse-env`, `--agents-file`, `--mount-file`, `--image`, `--allow-domain`, `--no-network`, `--background`), `ask` (con `--stream`), `status` (con `--live`), `continue`, `cancel`, `clean`, `routes`, `probe`, `fetch`.
+  - Comandos: `setup` (con `--install-skill`, `--list-skill-backups`, `--restore-skill`), `run` (con `--local-repo`, `--reuse-env`, `--agents-file`, `--mount-file`, `--image`, `--allow-domain`, `--no-network`, `--background`, `--delete-env`), `ask` (con `--stream`), `status` (con `--live`), `continue`, `cancel`, `clean`, `routes`, `probe`, `fetch`.
   - 230 tests unitarios contra fake HTTP server, sin tocar la red.
   - Backlog G1-G30 cerrado en su totalidad: ver el índice de arriba y
     `## Estado del backlog — cierre` al pie del archivo.

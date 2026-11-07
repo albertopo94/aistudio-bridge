@@ -51,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
              "travels), which is the only way a local-only or oversized "
              "repository can reach it",
     )
+    run.add_argument(
+        "--delete-env", action="store_true",
+        help="delete the sandbox once the delivery is verified (the branch "
+             "exists). A failed delivery always keeps it: the sandbox is "
+             "then the only copy of the work",
+    )
     run.add_argument("--model", default=None,
                      help=f"one of: {', '.join(planner.ALLOWED_MODELS)} "
                           "(default: stored config)")
@@ -243,7 +249,7 @@ def main(argv=None, *, runner=None) -> int:
             if args.local_repo is not None and args.reuse_env is not None:
                 parser.error("--local-repo builds a fresh sandbox, so it "
                              "cannot be combined with --reuse-env")
-            return _report_run(runner.run(
+            result = runner.run(
                 task=args.task, repo_url=args.repo, model=model,
                 budget=budget, branch=args.branch,
                 background=args.background,
@@ -254,7 +260,18 @@ def main(argv=None, *, runner=None) -> int:
                 mount_files=mount_files,
                 images=images,
                 local_repo=args.local_repo,
-            ))
+                delete_env=args.delete_env,
+            )
+            code = _report_run(result)
+            environment_id = result.get("environment_id")
+            if args.delete_env and result.get("env_release_error"):
+                # The delivery stands; the delete is the part that failed.
+                print(f"could not delete sandbox {environment_id}: "
+                      f"{result['env_release_error']}", file=sys.stderr)
+            if (not args.delete_env and result.get("status") == "completed"
+                    and environment_id):
+                _offer_sandbox_release(runner, environment_id)
+            return code
         if args.command == "clean":
             return _report_clean(runner.clean(apply=args.yes))
         if args.command == "fetch":
@@ -424,6 +441,34 @@ def _split_mount_files(values):
             )
         pairs.append((local.strip(), target.strip()))
     return pairs
+
+
+def _offer_sandbox_release(runner, environment_id: str) -> None:
+    """Ask whether to release the sandbox of a delivered run (T25/L42).
+
+    Only a delivered run gets here, so the branch already has the work and
+    deleting is safe. The default is KEEP, and an answer is only taken from
+    a terminal: an agent driving the CLI (stdin is a pipe) gets the question
+    and the command that answers it later, which is the same ask with the
+    same default.
+    """
+    if not sys.stdin.isatty():
+        print(f"sandbox {environment_id} is kept for 7 days; to release "
+              f"finished sandboxes: remote-worker clean")
+        return
+    try:
+        answer = input(f"sandbox {environment_id} is kept for 7 days -- "
+                       f"delete it now? [y/N] ").strip().lower()
+    except EOFError:
+        answer = ""
+    if answer not in ("y", "yes"):
+        return
+    try:
+        runner.environments.delete_environment(environment_id)
+        print(f"deleted sandbox {environment_id}")
+    except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+        print(f"could not delete sandbox {environment_id}: {exc}",
+              file=sys.stderr)
 
 
 def _report_run(result: dict) -> int:

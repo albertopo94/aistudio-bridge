@@ -218,7 +218,8 @@ class TaskRunner:
             agents_file: str | None = None,
             mount_files=None,
             images=None,
-            local_repo: str | None = None) -> dict:
+            local_repo: str | None = None,
+            delete_env: bool = False) -> dict:
         config = agent_config(model=model, budget=budget)
         network = network_config(allow_domains=allow_domains,
                                  no_network=no_network)
@@ -342,6 +343,7 @@ class TaskRunner:
             "tokens": tokens,
             "budget": config["max_total_tokens"],
             "branch": branch,
+            "environment_id": final.get("environment_id"),
             "report": self.client.last_model_output(final),
         }
         if upload_info:
@@ -400,6 +402,17 @@ class TaskRunner:
             "changed": applied["changed"],
             "tests_rc": tests_rc,
         })
+        if delete_env:
+            # The delivery is verified at this point (the branch exists), so
+            # the sandbox is a redundant copy and releasing it early is safe
+            # (T25/L42). A failed delete must not turn a delivered run into a
+            # failure: the outcome is the delivery, and the error is named.
+            try:
+                self.environments.delete_environment(environment_id)
+                result["env_released"] = True
+            except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+                result["env_released"] = False
+                result["env_release_error"] = str(exc)
         return result
 
     def _undelivered(self, task_id, *, branch, environment_id, result, exc):
