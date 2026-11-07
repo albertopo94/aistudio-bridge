@@ -88,7 +88,7 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T16 | S2 | PoC ~15 min: G5 upload ceiling 1.5 GB → decides whether G4 needs GCS. Script ready (`poc/g5_upload_ceiling.sh`); **live run is the user's** (consumes his API quota) | docs(poc) + v0.16.0 |
 | T17 | S2 | **DONE inline** (writer unavailable): `run --local-repo` — archive the tree, create the env, upload with `extract=true`, guard at the measured 1.5 GiB | feat(local-repo) v0.17.0 |
 | T18 | S2 | **closed by evidence** — G25 research returns HTTP 429 on the free tier (limit 0 input tokens/min), so it cannot run at all; G26/G29/G30 depend on it | docs(closing) |
-| T19 | closing | docs: mark every gap closed in the plan index; ADR 0001 reminder to the user | docs(closing) |
+| T19 | closing | **DONE inline** (docs only, no code): the plan gap index now tells the truth about G1-G30, and the two retracted numbers inside it are corrected. ADR 0001 stays the user's (AGENTS.md §9) | docs(closing) + v0.21.1 |
 | T20 | S8 | inline: G19 — recognise a 429 and explain the no-retry rule (SSE currently loses the HTTP status) | fix(rate-limit) |
 | T21 | S10,S11 | inline, test-first: route table as a data module + `routes` command + the fair-use 400 mapped to an actionable message; delete the fake 1.5 GiB guard | feat(routes) 98ec5cc + v0.18.0 d03b5ab |
 | T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) e3b4ca7 + v0.19.0 622d3a2 |
@@ -556,3 +556,23 @@ Lo que queda abierto después del slice 12, con su dueño: **T24** (validar shar
 vivo), **T25** (`--local-repo` end-to-end en vivo + decisión `--delete-env`) y
 **T27** (medir el techo de bajada). Los tres gastan la cuota del usuario y esperan
 su OK; ninguno se ofrece como ruta disponible hasta tener prueba en vivo.
+
+- **L38** (evidence) T19 done. The task read "the gap index still shows every G1-G30
+  row in its original 'to do' wording", and that was true: the index sorted gaps by
+  *priority as of 2026-11-05*, so G2, G4, G5, G7, G11, G22, G23, G24, G25 all read as
+  pending while the code had them closed for weeks. Replaced the priority table with a
+  **how-it-closed** table (code / doc / closed-by-live-evidence / dropped / still open)
+  and marked the three "Cobertura doc" audit sections and the "Próxima sesión" plan as
+  dated records rather than open work. Two stale claims found while doing it, both
+  worse than a missing checkmark because they assert something the code no longer does:
+  (1) the closing table credited G4 with a "guard against the measured ceiling", but
+  that guard (`UPLOAD_LIMIT_BYTES = 1530 MiB`) was deleted in v0.18.0 — the row now says
+  the guard was removed and why; (2) the closing table and its footer stated the upload
+  ceiling as a fact ("Techo real 1.5 GiB"), which is the exact claim the fair-use
+  measurement retracted the same evening it was made — both now state the window, not
+  the number. One honesty correction against my own first draft: I wrote that the G9 404
+  "was reproduced against the real API before writing code" (that is step 1 of the
+  design); L11 shows the reproduction was against the fake HTTP server, so the note says
+  that and names the missing live run instead of claiming it. `Estado` section updated
+  (v0.21.0, 42 commits, the real command list, 230 tests). No code touched: suite 230/230
+  before and after, and docs-only means PATCH per AGENTS.md §3.

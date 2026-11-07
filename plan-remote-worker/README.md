@@ -47,16 +47,21 @@ como branch con diff verificable.
 
 - Investigación: completa (documento base: `investigacion-google-antigravity-engram-gentle-ai.md`).
 - PoC: 7/7 pasos PASS (Ruta A 1-5 + Fase 2 E1-E3). Evidencia en `poc/`.
-- Producto: **WU-0 a WU-7 completos (v0.1.0 → v0.9.0)**, y backlog G1-G30 en curso
-  sobre la rama `feat/gaps-backlog` (v0.10.0).
+- Producto: **v0.21.0** sobre la rama `feat/gaps-backlog` (42 commits sobre
+  `main`, sin fusionar: abrir PR y mergeo son decisión del humano, AGENTS.md §5).
   - Setup interactivo con API key guardada en `~/.remote-worker/config.json` (0600), sin `.env` ni exports obligatorios.
-  - Comandos disponibles: `setup` (con `--install-skill`, `--list-skill-backups`, `--restore-skill`), `run`, `ask` (con `--stream`), `status`, `continue`, `cancel`.
-  - 95 tests unitarios contra fake HTTP server.
-  - Gaps cerrados en v0.10.0: G3, G6, G8, G14, G16 (doc), G17 (doc), G20, G21, G27, G28 (doc) + la regla de README para G10. Q1-Q3 del self-test hechos inline. G15 probado en vivo.
-  - Seguimiento de la feature: `odd/tasks/remote-worker-gaps.md` (S1-S9, T1-T19, Log).
+  - Comandos: `setup` (con `--install-skill`, `--list-skill-backups`, `--restore-skill`), `run` (con `--local-repo`, `--reuse-env`, `--agents-file`, `--mount-file`, `--image`, `--allow-domain`, `--no-network`, `--background`), `ask` (con `--stream`), `status` (con `--live`), `continue`, `cancel`, `clean`, `routes`, `probe`, `fetch`.
+  - 230 tests unitarios contra fake HTTP server, sin tocar la red.
+  - Backlog G1-G30 cerrado en su totalidad: ver el índice de arriba y
+    `## Estado del backlog — cierre` al pie del archivo.
+  - Seguimiento de la feature: `odd/tasks/remote-worker-gaps.md` (S1-S14, T1-T27, Log L1-L37).
 - Repo público: <https://github.com/albertopo94/aistudio-bridge>
 
-## Próxima sesión — self-test (el producto corrigiendo al producto)
+## Próxima sesión — self-test (el producto corrigiendo al producto) — ✅ HISTÓRICO
+
+> Registro de la sesión del 2026-11-05/06. Los 5 puntos del orden se ejecutaron
+> (ver la tabla del índice de gaps); se conserva el detalle porque documenta **cómo**
+> se probó cada cosa, no qué falta.
 
 Meta: probar la delegación real (skill → CLI global → worker remoto) usando
 tareas de este propio repo, **antes que cualquier otro fix** pendiente
@@ -65,7 +70,8 @@ tareas de este propio repo, **antes que cualquier otro fix** pendiente
 Condición dura: el worker monta el repo **desde GitHub**, no del worktree
 local. Esta sección debe estar commiteada y pushed antes de delegar.
 
-Orden acordado para la próxima sesión (2026-11-05), estado 2026-11-06:
+Orden acordado para la próxima sesión (2026-11-05), estado 2026-11-07 — los
+cinco puntos, cerrados:
 1. Smoke real del fix G15/G22 (v0.9.3): verificar en vivo que un turno de
    continuación y un `continue` llevan el contrato (system_instruction+tools).
    **HECHO en vivo 2026-11-06**: `ask` que fuerza un round-trip de memoria con
@@ -79,12 +85,13 @@ Orden acordado para la próxima sesión (2026-11-05), estado 2026-11-06:
    (skill discovery, key sin env, purge, tests, reporte, no-merge) queda como
    la primera delegación real contra GitHub cuando el usuario la dispare.
 3. G12+G13 (cancel server-side + background+polling) — los dos medias que
-   más tocan el uso diario.
-4. G9 (404 amigable).
-5. G1/G2/G17/G18 → el resto por el índice consolidado G1-G30.
+   más tocan el uso diario. **HECHO** v0.11.0 y v0.12.0.
+4. G9 (404 amigable). **HECHO** v0.10.1.
+5. G1/G2/G17/G18 → el resto por el índice consolidado G1-G30. **HECHO**: el
+   índice completo cerró en su totalidad (ver "Estado del backlog — cierre").
 
-Ejecución del backlog: se sigue en la rama `feat/gaps-backlog` con tracking
-en `odd/tasks/remote-worker-gaps.md` (spec S1-S9, tasks T1-T19, Log).
+Ejecución del backlog: se siguió en la rama `feat/gaps-backlog` con tracking
+en `odd/tasks/remote-worker-gaps.md` (hoy spec S1-S14, tasks T1-T27, Log L1-L37).
 
 ### Los 3 fixes del primer turno
 
@@ -121,13 +128,20 @@ Notas de ejecución:
 
 ## Índice de gaps (G1–G30, consolidado tras 7 auditorías de doc)
 
-Detalle completo por fuente en las secciones "Cobertura doc" de abajo.
+**Estado: cerrado en su totalidad.** Cada gap quedó implementado, documentado,
+cerrado por evidencia en vivo o descartado con motivo; la evidencia uno por uno
+está en `## Estado del backlog — cierre`, al final de este archivo, y el detalle
+de cada unidad en `odd/tasks/remote-worker-gaps.md`. Las secciones "Cobertura
+doc" de abajo se conservan como registro de la auditoría que parió cada gap
+(2026-11-05): describen el estado de *entonces*, no el actual.
 
-| Prioridad | Gaps |
+| Cómo cerró | Gaps |
 |---|---|
-| **media-alta / bug** | **G15** continuationes pierden system_instruction+tools (→ worker sin contrato ni memoria; con G22 también se pierde el puntero a AGENTS.md). **FIX v0.9.3** (commit 6fad9db): reenvío en run/ask/continue + record con kind/repo_dir. **PRUEBA EN VIVO PASS 2026-11-06**: trace de una corrida real muestra 2 turnos (inicial + continuación con `previous_interaction_id`), ambos con el contrato de 1052 chars y el set de tools completo. Pendiente: G22 parte b (source inline .agents/AGENTS.md). |
-| media | ~~G12~~ **v0.11.0** cancel server-side (`POST /v1beta/interactions/{id}/cancel`, **slash y no `:cancel`** — la forma `:cancel` que decía este índice NO está en la doc), ~~G13~~ **v0.12.0** `--background` en run/ask + watch acotado (5s x 360) + `continue` no compite con una interaccion viva; reconexion SSE no aplicada (el stream one-shot sigue siendo design; background cubre el dropout), G16 dos TTLs (**README v0.10.0** los separa; mensaje de error → ~~G9~~ **FIX v0.10.1**), G17 store/privacidad (**README v0.10.0** declara qué queda server-side; falta `interactions.delete` → G2), G22 AGENTS.md fuera de auto-load, G5 PoC 1.5GB. ~~G18~~ **v0.11.0** (`get_interaction` + `status --live`). ~~G19~~ **v0.11.0** (429 → exit 4 + hint + sin traceback; el status HTTP en SSE ya se preservaba). G1 network allowlist (factible directo en create_interaction; desbloquea G10), G10 hooks de repos de terceros (**regla documentada en README Security v0.10.0**; el allowlist sigue pendiente y es la mitigación real) |
-| low / doc | G2 cleanup, ~~G3~~ **doc v0.10.0**, G4 upload resumable (protocolo), ~~G6~~ **doc v0.10.0**, G7 --reuse-env, ~~G8~~ **doc v0.10.0**, G11/G28 multimodal (--image/PDF, builder único; ~~G28 doc v0.10.0~~), ~~G14/G27~~ **doc v0.10.0** (sección "What a task costs", $0 acotado a Antigravity), G19 429 (falta clasificación explícita en el cliente, incluido SSE), ~~G20~~ **doc v0.10.0**, ~~G21~~ **doc v0.10.0** (Argon fuera del set managed, documentado), G23 skills inline, G24 run sin google_search, G25 modo research, G26 store forzado, G29 preguntas deep-research, G30 background para research |
+| **Código** | G1 `--allow-domain`/`--no-network` · G2 `clean` · G4 `run --local-repo` · G7 `--reuse-env` · G9 `continue` sobre sandbox expirado · G11/G28 `--image` · G12 `cancel` server-side · G13 `--background` · G15 reenvío de contrato+tools en las continuaciones (v0.9.3, probado en vivo) · G18 `status --live` · G19 429 → exit 4 sin reintento ciego · G22 `--agents-file` · G23 skills vía `--mount-file` · G24 set de tools de `run` |
+| **Doc** | G3 (el agente lee texto e imagen) · G6 (compactación ~135k vs `max_total_tokens`) · G8 (stack del sandbox) · G10 (regla de README Security) · G14/G27 (qué cuesta una tarea) · G16 (los dos TTLs) · G17 (qué queda server-side) · G20 (pin del preview) · G21 (Argon fuera del set managed) |
+| **Cerrado por evidencia en vivo** | G5 (techo de subida medido; leer la nota de la ventana de fair use más abajo) · G25 (research: HTTP 429, límite **0** tokens/min en free tier → nunca puede correr) · G26/G29/G30 (dependen de G25) |
+| **Descartado** | T15, streaming de `run`: el loop de function-calling no se intercala en un stream one-shot y `--background` ya cubre el problema real (drop de conexión) |
+| **Sigue abierto** | Techo de **descarga** sin medir (T27) · shards sin validar en vivo (T24) · corrida end-to-end de `--local-repo` y la decisión `--delete-env` (T25) · ruta GCS documentada con cero código. Nada de esto se anuncia como disponible sin prueba en vivo. |
 
 ## Cobertura doc `agent-environment` (auditoría 2026-11-05)
 
@@ -281,7 +295,11 @@ Delta de límites vs README "Limits worth knowing" (candidatos a G6/G14):
 | G13 | media (confiabilidad) | Background execution: hoy el cliente mantiene el HTTP abierto hasta 600s; la doc recomienda `background=True` + polling de `GET /v1beta/interactions/{id}` para tareas largas (evita dropouts de socket). |
 | G14 | doc | README "Limits"/"Models": baselines de costo (US$0.25–3.25; ~US$5 máximo), 50-70% input cacheado, los 2 modelos adicionales existentes (el piso sigue siendo decisión del usuario). |
 
-### TODO — PoC del upload resumable (~1.5 GB), post-self-test
+### TODO — PoC del upload resumable (~1.5 GB), post-self-test — ✅ EJECUTADO (G5)
+
+Corrido en vivo el 2026-11-06: ver G5 en la tabla de cierre. El resultado corrigió el
+enunciado de este TODO: no hay un techo de tamaño por archivo, hay una ventana de
+fair use de la cuenta, y por eso el producto no guarda ningún número de bytes.
 
 Objetivo: medir el techo real de un upload directo al sandbox. Si 1.5 GB
 pasa (entra y se queda), la vía GCS (2 GB documentados) es redundante para
@@ -412,7 +430,14 @@ colaborativo, visualizaciones y costo por tarea.
 
 Refinement G21 (2ª instancia): la continuación de deep-research usa `model="gemini-4-argon"` plano — el patrón mix agent→model existe y nuestro `continue_task` no lo usa (queda para el TODO multi-agente/mixed-model).
 
-### TODO — G9: mensaje amigable para `continue` contra sandbox expirado
+### TODO — G9: mensaje amigable para `continue` contra sandbox expirado — ✅ EJECUTADO (v0.10.1)
+
+Hoy la tarea queda marcada `expired` (TTL 7 días), el mensaje dice que la tarea
+no es reanudable y el CLI sale 3 sin advice de `continue` inútil. Testigo:
+`tests/test_expired_task.py`, 5 reglas, RED observado como 404 escapando de
+`continue_task` (Log L11). El paso 1 del diseño (reproducir el 404 contra la API
+real y anotar el body exacto) **no quedó registrado como corrida en vivo**: la
+reproducción fue contra el fake HTTP server.
 
 Hoy `continue` a los 7 días del TTL devuelve el 404 crudo de la API
 (`Interactions API error 404: <body>`); el usuario no sabe que el sandbox
@@ -465,8 +490,8 @@ cada unidad (decisiones, RED/GREEN, hallazgos) vive en
 | G1 | cerrado | `run --allow-domain` / `--no-network` (v0.13.0) |
 | G2 | cerrado | `clean` dry-run por defecto + `--yes`; list/delete de environments (v0.13.0) |
 | G3 | doc | README "Limits": el agente lee texto e imagen (v0.10.0) |
-| G4 | cerrado | `run --local-repo`: tar del working tree + upload resumable con `extract=true`, guard contra el techo medido (v0.17.0) |
-| G5 | cerrado (medido en vivo) | Techo real **1.5 GiB**: 1530 MiB aceptados, 1536 MiB rechazados con 400 "File size exceeds maximum allowed limit" |
+| G4 | cerrado | `run --local-repo`: tar del working tree + upload resumable con `extract=true` (v0.17.0). El guard local contra el techo se **borró en v0.18.0**: era un número fijo y la ventana de fair use no lo es (ver G5) |
+| G5 | cerrado (medido en vivo) | El techo **no es un tamaño de archivo**: es la ventana de fair use de la cuenta sobre un intervalo de tiempo. Medido el mismo día: 1530 MiB aceptados con cuota fresca y rechazados 1536 MiB con 400 "File size exceeds maximum allowed limit"; horas después, 300 MiB cayendo al acumular 290 MiB y 20 MiB pasando minutos más tarde. El número "1.5 GiB" se retiró del producto (v0.18.0) |
 | G6 | doc | compactación ~135k vs `max_total_tokens` (v0.10.0) |
 | G7 | cerrado | `run --reuse-env` (v0.14.0) |
 | G8 | doc | stack del sandbox, 4 cores/16 GB (v0.10.0) |
@@ -506,6 +531,12 @@ máximo); el planning colaborativo son tres turnos
 `POST /v1beta/environments` se llama con body vacío `{}` (el recurso
 `Environment` no tiene campo `type`; eso solo existe en `Source`). El upload
 resumable acepta cualquier `X-Upload-Content-Length` en el init y corta al
-acumular: 1530 MiB pasan, 1536 MiB devuelven 400. `extract` y `overwrite` van
+acumular. Lo que corta **no es un tamaño fijo**: es la ventana de fair use de la
+cuenta sobre un intervalo de tiempo, así que ningún número de bytes pertenece al
+producto (por eso `UPLOAD_LIMIT_BYTES` se borró en v0.18.0 y la tabla de `routes`
+dice "la ventana de fair use de la cuenta en ese momento"). El 400 "File size
+exceeds maximum allowed limit" se traduce a un mensaje que nombra la ventana y
+las rutas que quedan, y el sandbox medio usado de la intento fallido se libera en
+vez de quedar 7 días en la cuenta. `extract` y `overwrite` van
 en el init, nunca en los chunks, y con `extract=true` sobre un target que
 termina en `/` el contenido aterriza directo en ese directorio.
