@@ -454,6 +454,26 @@ def _report_run(result: dict) -> int:
         print(f"resume it with: remote-worker continue {task_id}")
         return 0
 
+    if status == "undelivered":
+        # The agent finished and spent its budget; the bytes never arrived.
+        # Printing only the raw service error (as before) left the user with a
+        # paid-for task and no way out, when the work is sitting in the
+        # sandbox reachable file by file (F1).
+        print(result.get("report") or "")
+        print(f"delivery: failed -- the work is in the sandbox "
+              f"{result.get('environment_id')}, but it could not be brought "
+              f"back:\n  {result.get('delivery_error')}", file=sys.stderr)
+        print("the task itself is done and paid for, so it is not continued; "
+              "the sandbox holds the files for the rest of its 7-day life. "
+              "Recover them with:", file=sys.stderr)
+        print(f"  remote-worker fetch {task_id} --list", file=sys.stderr)
+        print(f"  remote-worker fetch {task_id} --path <file>",
+              file=sys.stderr)
+        print("no branch was created, so there is nothing to merge; and "
+              "`clean` keeps this sandbox while the task reads undelivered",
+              file=sys.stderr)
+        return 3
+
     if status != "completed":
         report = result.get("report")
         if report:

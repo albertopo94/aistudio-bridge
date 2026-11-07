@@ -389,7 +389,11 @@ the sandbox pushing the result to your git host
 
 `run` takes the first row for you: every completed run downloads the workspace,
 applies it to a fresh clone on a new branch and runs your tests before you look
-at it. `fetch` is for the other two questions — *what did it produce?* and *just
+at it. That download has its own outcome: if it fails (a workspace above the
+tar's ~1 GiB ceiling answers 500/504), the task records `undelivered` — not
+`completed` — says the service's error, prints the `fetch` commands that reach
+the bytes file by file, and keeps the sandbox out of `clean --yes` until the
+work is back. `fetch` is for the other two questions — *what did it produce?* and *just
 give me that file* — which would otherwise cost the whole archive to answer:
 
 ```bash
@@ -495,6 +499,15 @@ and the fix is one constant in `remote_worker/runner.py`.
   you what it cost; `--budget` caps a single task.
 - Hitting the budget is not a failure: the run exits 0, reports
   `incomplete`, and prints the exact `continue` command.
+- A task can also finish and **not deliver**: the agent's turn completed and
+  spent its tokens, but bringing the workspace back failed (measured live: a
+  3.6 GiB workspace answers HTTP 500; the tar ceiling sits under 1 GiB). That
+  task records `undelivered`, exits 3, and says so instead of pretending a
+  branch exists — the work is still in the sandbox for its 7-day life, and the
+  run prints how to take it back file by file (`fetch --list`, `fetch --path`).
+  `clean` will not delete that sandbox while the task reads `undelivered`,
+  because it is the only copy; and `continue` refuses it, because the turn is
+  over and paid for — the recovery is `fetch`, not another budget.
 - A rate limit exits with the API's own message and **never retries**. That is
   deliberate: a continuation carries `previous_interaction_id`, so a blind
   retry is not idempotent — it would fork a second branch of the conversation

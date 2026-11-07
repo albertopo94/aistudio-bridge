@@ -149,6 +149,11 @@ and the work is meant to end as a local branch the user reviews and pushes.
 - Never run git push/merge on the worker's result; that is the user's call.
 - A status of `incomplete` is not a failure: tell the user the exact
   `remote-worker continue <task_id>` command.
+- A status of `undelivered` means the task finished and paid its tokens but
+  the bytes could not come back (the workspace was too large for the tar).
+  Do not re-run or continue it: the sandbox still holds the work for 7 days.
+  Offer `remote-worker fetch <task_id> --list`, then `--path <file>` for the
+  files that matter (under 1 GiB each), and say no branch exists to merge.
 """
 # --- public API (the CLI calls these) ---
 

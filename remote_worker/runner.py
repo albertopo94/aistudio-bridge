@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import sys
+import tarfile
 import time
 from urllib.parse import urlsplit
 
@@ -26,8 +27,8 @@ from .planner import (agent_config, network_config, task_parts,
 from .routes import (human_duration, human_rate, is_size_limit,
                      upload_failure_message)
 from .state import DEFAULT_ROOT, TaskStore, _slug
-from .sync import (apply_to_branch, archive_repo, inline_source, mount_repo,
-                   run_tests, INLINE_TOTAL_LIMIT_BYTES)
+from .sync import (GitError, apply_to_branch, archive_repo, inline_source,
+                   mount_repo, run_tests, INLINE_TOTAL_LIMIT_BYTES)
 
 AGENT = "antigravity-preview-09-2026"
 DEFAULT_TEST_COMMAND = ["python3", "tests/test_main.py"]
@@ -350,17 +351,31 @@ class TaskRunner:
         environment_id = final.get("environment_id")
         os.makedirs(self.workdir, exist_ok=True)
         tar_path = os.path.join(self.workdir, f"{task_id}.tar")
-        self.files.download_to(environment_id, "workspace", tar_path)
-
-        applied = apply_to_branch(
-            tar_path=tar_path, repo_url=repo_url, branch=branch,
-            workdir=os.path.join(self.workdir, "clone"),
-            repo_dir=repo_name,
-        )
-        # The workspace archive is the whole sandbox tree. Nothing after this
-        # reads it, so it goes now rather than accumulating one copy per task.
-        if os.path.exists(tar_path):
-            os.remove(tar_path)
+        # Delivery is the one step of a completed task that can still fail, and
+        # it failed for real: the download of a 3.6 GiB workspace answered 500
+        # after the agent had spent 93k tokens (L39). The bytes were still in
+        # the sandbox; the task record said `completed` and the raw error
+        # escaped. So the return path is taken as a unit with a stated outcome:
+        # either the work lands on a branch, or the task says `undelivered` and
+        # names how to recover it. A half-written archive is never left behind.
+        try:
+            self.files.download_to(environment_id, "workspace", tar_path)
+            applied = apply_to_branch(
+                tar_path=tar_path, repo_url=repo_url, branch=branch,
+                workdir=os.path.join(self.workdir, "clone"),
+                repo_dir=repo_name,
+            )
+        except (InteractionsError, InteractionsTimeoutError, GitError,
+                tarfile.TarError, OSError) as exc:
+            return self._undelivered(task_id, branch=branch,
+                                     environment_id=environment_id,
+                                     result=result, exc=exc)
+        finally:
+            # The workspace archive is the whole sandbox tree. Nothing after
+            # this reads it, so it goes now rather than accumulating one copy
+            # per task -- including the partial one a failed download leaves.
+            if os.path.exists(tar_path):
+                os.remove(tar_path)
         # The diff the user reviews must not contain artifacts that the test
         # run will add, so the tests run against a throwaway copy.
         tests_clone = self._prepare_tests_clone(applied["clone_dir"])
@@ -379,6 +394,31 @@ class TaskRunner:
             "changed": applied["changed"],
             "tests_rc": tests_rc,
         })
+        return result
+
+    def _undelivered(self, task_id, *, branch, environment_id, result, exc):
+        """Record a task whose agent finished but whose bytes did not arrive.
+
+        `undelivered` exists because the status is load-bearing twice, and both
+        times the wrong word costs the user their work:
+
+        - `clean --yes` deletes the sandbox of any task in FINISHED_STATUSES.
+          For this task the sandbox is the ONLY copy of the work, so it must
+          not count as finished (see FINISHED_STATUSES).
+        - `completed` would tell the user to review a branch that was never
+          created; `failed` would suggest the task itself needs re-running,
+          and its turn is over and paid for.
+
+        The service's own words are kept: 500 and 504 mean different things to
+        the user (one names the size of what the agent produced), and this tool
+        has no theory about the deadline the service hits.
+        """
+        detail = str(exc).strip() or type(exc).__name__
+        self.store.record({"task_id": task_id, "status": "undelivered",
+                           "branch": branch, "environment_id": environment_id,
+                           "delivery_error": detail})
+        result.update({"status": "undelivered", "delivery_error": detail,
+                       "environment_id": environment_id})
         return result
 
     def _inline_sources(self, *, agents_file: str | None,
@@ -536,6 +576,8 @@ class TaskRunner:
         }
 
     # Statuses after which an environment is certainly no longer needed.
+    # `undelivered` is deliberately NOT here: that task's sandbox is the only
+    # copy of work the agent already paid for, so `clean` keeps it (F1).
     FINISHED_STATUSES = ("completed", "canceled", "expired", "failed")
 
     def probe(self) -> dict:

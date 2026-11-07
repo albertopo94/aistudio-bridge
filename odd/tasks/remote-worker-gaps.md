@@ -554,6 +554,7 @@ en estas líneas y nada se aplasta.
 | 13 | T19: el índice del plan dice la verdad (G1-G30 por cómo cerró) + 2 claims podridos corregidos | T19 · 9f97287, 21f69f4 | 0.21.1 |
 | 14 | fix `fetch`: campo de tamaño real (`size_bytes`) + causalidad del 404 (path vs expirado) | L40 · ee7b0e1, 0252556 | 0.21.2 |
 | 15 | T27: techo de bajada medido en vivo; celdas `not measured` reemplazadas por números con su error | T27 · (feat) + bump | 0.22.0 |
+| 16 | F1: tarea grabada `completed` aunque la bajada falló → estado `undelivered` + `clean` la protege + `continue` la rechaza + CLI imprime la recuperación | L41 · (fix) + bump | 0.22.1 |
 
 Lo que queda abierto después del slice 15, con su dueño: **T24** (validar shards
 en vivo) y **T25** (`--local-repo` end-to-end en vivo + decisión `--delete-env`).
@@ -564,11 +565,18 @@ disponible hasta tener prueba en vivo.
 del tar falla (tar > ~1 GiB, o un workspace que el agente llenó de artefactos),
 la tarea ya quedó grabada `completed` con reporte y tokens, el branch nunca se
 crea, y el CLI escupe el 500/504 crudo del servicio. Estado y entrega
-discrepan: `completed` sin resultado entregable. Arreglo sugerido (no hecho):
-grabar la tarea como completada-sin-entregar cuando `download_to` falla, con el
-camino de recuperación impreso (`fetch --list` / `--path`), y salida dedicada.
-Evidencia: corrida t_1794045414 (3.6 GiB), 93.446 tokens, `status: completed`,
-branch `worker/t27-download-ceiling` inexistente.
+discrepan: `completed` sin resultado entregable. **FIX (L41):** el retorno se toma como unidad con resultado declarado.
+`run` envuelve `download_to` + `apply_to_branch` en un try que captura el error
+del servicio (500/504), el timeout, un tar ilegible y un git fallado, y graba
+la tarea como `undelivered` — un estado nuevo que no está en
+`FINISHED_STATUSES`, así que `clean` NO borra el sandbox (es la única copia de
+los bytes) y `continue` la rechaza (el turno terminó y se pagó). El CLI
+imprime la recuperación exacta (`fetch <task> --list`, `--path <file>`), el
+TTL de 7 días, el error del servicio, y sale 3; un half-archive nunca queda en
+el workdir. Evidencia original: t_1794045414 (3.6 GiB), 93.446 tokens,
+`status: completed`, branch `worker/t27-download-ceiling` inexistente.
+Tests: tests/test_delivery_failure.py (6 reglas, incl. el camino sano con tar
+real + clone real). Suite 239/239.
 
 - **L38** (evidence) T19 done. The task read "the gap index still shows every G1-G30
   row in its original 'to do' wording", and that was true: the index sorted gaps by
@@ -623,3 +631,25 @@ branch `worker/t27-download-ceiling` inexistente.
   one level down + exit 2, unreadable root = refuse to guess. Fake server
   learned both live shapes, including that a dead sandbox does NOT 404 at root
   (200 with nothing inside). Suite after: see commit.
+
+- **L41** (evidence) F1 fixed test-first. RED first, observed: with a fake that
+  answers 500 on the workspace download, `run` raised the raw
+  `InteractionsError` through the record it had just written as `completed`
+  (and a corrupt tar raised `tarfile.ReadError` the same way). GREEN: the
+  return path is one unit with a declared outcome. `run` catches the download
+  and the apply failures (service error, timeout, unreadable tar, git failure)
+  and records `undelivered` — a status that is deliberately NOT in
+  `FINISHED_STATUSES`, because `clean --yes` deletes the sandbox of every
+  finished task, and for this one the sandbox is the only copy of the work the
+  agent already paid for. `continue` refuses it (the turn is over; its guard
+  already rejects anything that is not `incomplete`), and the CLI prints the
+  recovery — `fetch <task> --list`, `fetch <task> --path <file>` — with the
+  7-day TTL, the service's own error, and exit 3. A partial tar is removed in a
+  `finally`, so a failed download no longer accumulates a garbage archive per
+  task. The healthy path is pinned by a test that uses a REAL tar and a REAL
+  local clone, not mocks, so the try/except cannot silently swallow delivery:
+  the branch appears, the diff shows `main.py`, and the tar is cleaned up.
+  The old evidence task t_1794045414 still shows `completed` in its state
+  record; it was created before the fix and is left as-is (its sandbox still
+  holds the 3.6 GiB if the user wants to recover it; `clean` now keeps it,
+  which is the behaviour the old record was missing). Suite 239/239.
