@@ -95,7 +95,7 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T23 | S12 | inline, test-first: `probe` command | feat(probe) 25461f9 + v0.20.0 dfc60b4 |
 | T24 | S11 | **blocked** — live validation of sharded upload before it may be advertised; needs the user's quota OK | — |
 | T25 | S11 | **blocked** — live end-to-end `--local-repo` run + `--delete-env` decision; needs the user's quota OK | — |
-| T26 | S13,S14 | inline, test-first: the return path as a data table; expose `list`/fetch-one-file from the CLI (the client already has both); document the GitHub rejection and the unmeasured ceiling | — |
+| T26 | S13,S14 | inline, test-first: the return path as a data table; expose `list`/fetch-one-file from the CLI (the client already has both); document the GitHub rejection and the unmeasured ceiling | feat(fetch) 3a71cac + v0.21.0 |
 | T27 | S14 | **blocked** — measure the download ceiling live; needs the user's quota OK, and the honest variant costs more than the cheap one (L35) | — |
 
 ## Log
@@ -488,3 +488,43 @@ con `gh` (push, `gh pr create`) es comportamiento normal de su lado y **no se
 documenta, no se implementa, no se imprime como sugerencia desde el tool**: quedó
 explícitamente descartado, para que ninguna sesión futura lo re-proponga como
 feature. El flujo del tool termina en la rama local y ahí muere su alcance.
+
+**L37** (evidence) T26 entregado inline, test-first, v0.21.0. RED observado por la
+razón correcta (`AttributeError: module 'remote_worker.routes' has no attribute
+'format_return_routes'`; 21 tests, 17 errores + 1 fallo). Dos ajustes que hay que
+nombrar para que el verde valga: los aflojé **antes** de implementar, no después
+de ver el fallo, y en los dos la aserción quedó más estricta que la original —
+`method_paths()` compara strings completos, así que `assertIn` de un prefijo no
+aplica (se pasó a la ruta exacta con `?recursive=true`), y la idea de un
+`return_alternatives_line()` se cambió por verificar que ninguna fila
+`refused by design` aparece entre las usables, que es la regla de S11 y no una
+función nueva que nadie pide.
+
+Lo que landed: `RETURN_ROUTES` en `routes.py` (4 filas, los mismos campos que la
+de subida: `ceiling`/`speed`/`needs`/`status`), `format_return_routes()`,
+`return_routes_by_id()` y `STATUS_REFUSED`; `routes` imprime las dos tablas y
+sigue offline. En el runner, `list_workspace()` y `fetch_file()` sobre el
+`FilesClient` que ya existía: todo lo resoluble localmente (task desconocida,
+task sin sandbox, archivo local que existe) se resuelve **antes** de mandar la
+petición, así un error de tipeo cuesta cero. `fetch` en la CLI con `--list`,
+`--path`, `--out`, `--overwrite`; un directorio como `--out` es destino, no
+archivo a pisar; la bajada de un archivo usa `recursive=False` porque es un
+archivo, no un árbol a tar. El 404 se lee como sandbox expirado (TTL 7 días) con
+la acción y sale `3`, igual que G18/G9 en su forma.
+
+Lo que **no** se hizo a propósito: tres techos dicen `not measured` en palabras
+(S14). Medirlos honesto necesita un árbol grande adentro del sandbox primero, y
+eso gasta ventana de subida o cuota de tarea (T27 sigue bloqueado esperando OK
+del usuario). Escribir un número ahí sería la misma clase de error que el
+constante de 1.5 GiB que este proyecto ya borró.
+
+Tests separados por interés, como en el resto del repo: `tests/test_return_path.py`
+(la tabla, sus filas, sus tres lectores) y `tests/test_fetch_command.py` (la CLI
+contra un fake del endpoint de files, `alt=media` en la bajada y ausente en el
+listing). Suite **230/230** (80.7s). Chequeo diferencial contra `ce97554` en 12
+invocaciones offline, con el harness corregido de L14 (cada lado desde un
+directorio vacío, `PYTHONPATH` decidiendo el import, y línea de cordura mostrando
+que base no conoce `fetch`): difieren solo `-h` (el subcomando nuevo, +7/-4) y
+`routes` (la tabla de bajada agregada, +24/-0). Las otras 10, idénticas en
+stdout, stderr y código de salida. El README además deja de afirmar que la ruta
+de subida está "not implemented yet", que era falso desde v0.17.0.
