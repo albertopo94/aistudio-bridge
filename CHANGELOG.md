@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.22.1] — 2026-11-07
+
+### Fixed
+
+- A task whose agent finished but whose workspace could not come back is no
+  longer recorded `completed`. The return path (download + apply) is now one
+  unit with a stated outcome: if it fails — service 500/504, a timeout, an
+  unreadable tar, or a git failure — the task records `undelivered`. That
+  status is deliberately not in the `clean` "finished" set, because for this
+  task the sandbox is the only copy of work the agent already paid for, and
+  `clean --yes` would have deleted it as if it were done. `continue` refuses
+  it (the turn is over); the CLI prints the recovery — `fetch <task> --list`,
+  `fetch <task> --path <file>` — the 7-day TTL — and exits 3. A partial
+  archive left by a failed download is removed. Found by the T27 measurement:
+  a 3.6 GiB workspace answered HTTP 500 after the agent had spent 93k tokens
+  (odd L39); before this fix the task said `completed` and the branch never
+  appeared.
 ## [0.22.0] — 2026-11-07
 
 ### Changed
