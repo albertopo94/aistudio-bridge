@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.22.5] — 2026-11-07
+
+### Fixed
+
+- Two defects found by the first live runs of the local-repo path (T25):
+  `run --local-repo` referenced its sandbox with an invented `{"id": ...}`
+  object, which the service rejects ("Provide a 'type' field (for
+  EnvironmentConfig) at 'environment'"); it now passes the environment id
+  the documented way, and `--reuse-env` uses
+  `{type: remote, environment_id, sources}` so the sandbox is updated
+  instead of created. The test fake now mirrors that 400, so no invented
+  shape can go green again.
+- A delivery can no longer land on a clone of another repository.
+  `apply_to_branch` reused whatever clone existed at the per-project clone
+  path, so the branch of a task for repository B could be applied to the
+  history of repository A (found live: the branch went into the
+  worker-poc-toy clone from the PoC era, and the real repository never
+  received it). The clone is now used only when its origin is that exact
+  repository; a mismatched clone is kept under a dated backup name and the
+  right one is cloned.
+
 ## [0.22.4] — 2026-11-07
 
 ### Changed
