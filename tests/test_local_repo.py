@@ -16,7 +16,10 @@ Rules under test:
 4. The uploaded archive is unpacked with `extract=true` into
    `workspace/<name>/`, which is the same layout a mounted repository gets, so
    the return path keeps working unchanged.
-5. The interaction then runs inside that environment (`{"id": ...}`), not in a
+5. The interaction then runs inside that environment (the id as a bare
+   string, the documented "reuse" form), not in a fresh one: the archive
+   is already there, and the service requires `type` on an
+   EnvironmentConfig object.
    fresh sandbox, or the uploaded files would be invisible to it.
 6. The CLI accepts exactly one of `--repo` and `--local-repo`.
 """
@@ -221,7 +224,7 @@ class LocalRepoRunTest(unittest.TestCase):
         self.assertIn("/files/workspace/r/", init["path"])
         self.assertIn("example.com", create["body"].decode())
         self.assertEqual(json.loads(interaction["body"])["environment"],
-                         {"id": "env_up"})
+                         "env_up")
         self.assertEqual(result["environment_id"], "env_up")
         self.assertGreater(result["archive_bytes"], 0)
 

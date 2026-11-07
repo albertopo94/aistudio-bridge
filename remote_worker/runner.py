@@ -257,13 +257,19 @@ class TaskRunner:
                 local_repo, repo_name, sources=sources, network=network,
                 task_id=task_id,
             )
-            environment = {"id": upload_info["id"]}
+            # The archive already lives in a sandbox that was created with
+            # its sources and network, so the interaction references it the
+            # documented way: the id as a bare string. A {"id": ...} object
+            # is an EnvironmentConfig missing `type` and the service rejects
+            # it (T25 live defect; the reference makes `type` required).
+            environment = upload_info["id"]
         elif reuse_env:
-            # An existing sandbox is named by id: it already has its own
-            # sources and network rules, so only the mounts this task needs
-            # are added to it. Dependencies installed by an earlier task
-            # survive here, which is the point (G7).
-            environment = {"id": reuse_env, "sources": sources}
+            # An existing sandbox is named by id; the mounts this task needs
+            # travel as the documented EnvironmentConfig form, where
+            # environment_id means "update this environment, do not create a
+            # new one" and `type` is required.
+            environment = {"type": "remote", "environment_id": reuse_env,
+                           "sources": sources}
         else:
             environment = {"type": "remote", "sources": sources}
             if network:

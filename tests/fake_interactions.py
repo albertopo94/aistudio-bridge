@@ -76,6 +76,33 @@ class FakeInteractionsServer:
                     "headers": {k.lower(): v for k, v in self.headers.items()},
                     "body": body,
                 })
+                # Mirror the live contract for the interaction's
+                # `environment` field: an object there is an
+                # EnvironmentConfig, where `type` is required and its value
+                # is "remote"; an existing environment is referenced by its
+                # id as a bare STRING. The real service answers this exact
+                # 400 otherwise, and this fake let an invented {"id": ...}
+                # shape go green until T25 ran it live (odd L44).
+                if self.path.startswith("/v1beta/interactions") and body:
+                    try:
+                        parsed = json.loads(body)
+                    except (json.JSONDecodeError, TypeError):
+                        parsed = None
+                    env = (parsed.get("environment")
+                           if isinstance(parsed, dict) else None)
+                    if isinstance(env, dict) and not env.get("type"):
+                        err = json.dumps({"error": {
+                            "message": "Provide a 'type' field (for "
+                                       "EnvironmentConfig) at "
+                                       "'environment'",
+                            "code": "invalid_request",
+                        }}).encode("utf-8")
+                        self.send_response(400)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(err)))
+                        self.end_headers()
+                        self.wfile.write(err)
+                        return
                 if outer.reply_delay:
                     import time
                     time.sleep(outer.reply_delay)

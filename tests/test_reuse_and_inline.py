@@ -97,9 +97,13 @@ class ReuseEnvTest(unittest.TestCase):
                 reuse_env="env_hot",
             )
             env = json.loads(srv.requests[0]["body"])["environment"]
-        self.assertEqual(env["id"], "env_hot")
+        # The documented EnvironmentConfig: `type` is required, and
+        # environment_id names the sandbox to update instead of creating a
+        # new one. (A bare {"id": ...} object is rejected live with
+        # "Provide a 'type' field (for EnvironmentConfig)".)
+        self.assertEqual(env["type"], "remote")
+        self.assertEqual(env["environment_id"], "env_hot")
         self.assertEqual(env["sources"][0]["target"], "/workspace/r")
-        self.assertNotIn("type", env)   # an existing environment is not "remote"
 
     def test_reuse_records_the_environment_it_used(self):
         with FakeInteractionsServer() as srv:
