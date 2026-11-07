@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.22.0] — 2026-11-07
+
+### Changed
+
+- The return-path table now carries measured numbers instead of three
+  `not measured` cells (T27, user-authorized live run; files generated inside
+  the sandbox so no upload window was spent). Single file: 1 GiB passed in
+  348.9 s (~2.9 MiB/s), 2 GiB refused `504 deadline_exceeded` at 121.8 s; what
+  lies between stays explicitly unmeasured. The recursive tar — the transport
+  every `run` uses — refused 1 GiB with 504 and a 3.6 GiB workspace with 500,
+  both at ~122 s: the limit is a service deadline in time, not a documented
+  size. README and the skill carry the same rendered table (drift-pinned).
+
+### Known follow-up recorded
+
+- F1: when that tar fails, the task is already recorded `completed` and the
+  raw service error escapes while no branch is created. Recorded in
+  `odd/tasks/remote-worker-gaps.md` with its evidence; not fixed here.
+
 ## [0.21.2] — 2026-11-07
 
 ### Fixed
