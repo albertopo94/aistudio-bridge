@@ -528,3 +528,31 @@ que base no conoce `fetch`): difieren solo `-h` (el subcomando nuevo, +7/-4) y
 `routes` (la tabla de bajada agregada, +24/-0). Las otras 10, idénticas en
 stdout, stderr y código de salida. El README además deja de afirmar que la ruta
 de subida está "not implemented yet", que era falso desde v0.17.0.
+
+## Slice boundaries (L12 applied, 2026-11-07)
+
+La rama pasó hace rato la guía de ~400 líneas authored lines y lo hizo a propósito:
+esto es un backlog largo, así que la unidad revisable es el **work unit**, no la
+rama. Cada uno trae su commit de comportamiento con tests y docs juntos, su entry de
+CHANGELOG, su bump y la suite verde en ese commit. Si algún día se abre PR, se corta
+en estas líneas y nada se aplasta.
+
+| Slice | Work unit | Commits | Versión |
+|---|---|---|---|
+| 1 | Q1–Q3 self-test + request trace | ee12efb..4654df7 | sobre 0.9.3 |
+| 2 | docs de gaps (G3/G6/G8/G14/G16/G17/G20/G21/G28/G10) | docs work unit | 0.10.0 |
+| 3 | G9: 404 del sandbox expirado, amigable | T4 | 0.10.1 |
+| 4 | G12 + G18 + G19 (cancel, get, 429 sin perder estado) | T13/T8/T20 | 0.11.0 |
+| 5 | G13 background + polling + watch | T14 | 0.12.0 |
+| 6 | G5 medición en vivo + `UploadClient`/`tar_gz` + PoC | T16 | 0.15.0→0.16.0 |
+| 7 | G4 `run --local-repo` | T17 | 0.16.0→0.17.0 |
+| 8 | S10+S11 tabla de rutas, 400 fair-use traducido, guard falso afuera | T21 · 98ec5cc, d03b5ab | 0.18.0 |
+| 9 | progreso de subida visible en stderr | T22 · e3b4ca7, 622d3a2 | 0.19.0 |
+| 10 | `probe` (ventana de subida medida en 1 s) | T23 · 25461f9, dfc60b4 | 0.20.0 |
+| 11 | trazabilidad tarea→commit en este doc | ed41223 | 0.20.1 |
+| 12 | S13+S14 tabla de bajada + `fetch` + rechazo de push documentado | T26 · 3a71cac, fc874ac, db3d3fe | 0.21.0 |
+
+Lo que queda abierto después del slice 12, con su dueño: **T24** (validar shards en
+vivo), **T25** (`--local-repo` end-to-end en vivo + decisión `--delete-env`) y
+**T27** (medir el techo de bajada). Los tres gastan la cuota del usuario y esperan
+su OK; ninguno se ofrece como ruta disponible hasta tener prueba en vivo.
