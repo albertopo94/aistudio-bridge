@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.23.0] — 2026-11-07
+
+### Added
+
+- `run --delete-env`: delete the sandbox once the delivery is verified.
+  A failed delivery (`undelivered`) always keeps it, because the sandbox is
+  then the only copy of the work. Without the flag, a delivered run names
+  the sandbox and asks -- a `[y/N]` prompt in a terminal (keep is the
+  default), or the same question plus the `clean` command when an agent
+  drives the CLI. A delete that fails is reported; it never turns a
+  delivered run into a failure.
+
 ## [0.22.5] — 2026-11-07
 
 ### Fixed
