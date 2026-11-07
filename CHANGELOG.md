@@ -5,6 +5,32 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.21.0] — 2026-11-07
+
+### Added
+
+- `fetch` reads what a task left in its sandbox without taking the whole
+  workspace back: `fetch <task> --list` moves metadata only, and
+  `fetch <task> --path FILE` brings that one file (`--out` to choose where, and
+  an existing local file is never replaced unless you say `--overwrite`). Both
+  granularities already existed in the client and nothing could reach them; both
+  create no interaction, because reading bytes back is not a task.
+- The way back out of the sandbox is now a table like the way in, printed by the
+  same `routes` command: one transport, three granularities, and the git-host
+  push listed as `refused by design` with its reason (a write credential would
+  have to live inside a sandbox you do not control). README and the skill embed
+  the rendered table, so no copy can drift from the CLI's.
+
+### Documentation
+
+- Three return-path ceilings say **not measured** instead of guessing. No
+  download ceiling is documented or observed, and measuring it honestly needs a
+  large tree inside a sandbox first, which costs upload window or task quota. A
+  number there would be the same failure class as the deleted 1.5 GiB upload
+  constant.
+- README says why the worker never pushes to your git host, and no longer claims
+  the upload path is "not implemented yet".
+
 ## [0.20.1] — 2026-11-06
 
 ### Documentation
