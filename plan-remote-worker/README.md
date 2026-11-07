@@ -141,7 +141,7 @@ doc" de abajo se conservan como registro de la auditoría que parió cada gap
 | **Doc** | G3 (el agente lee texto e imagen) · G6 (compactación ~135k vs `max_total_tokens`) · G8 (stack del sandbox) · G10 (regla de README Security) · G14/G27 (qué cuesta una tarea) · G16 (los dos TTLs) · G17 (qué queda server-side) · G20 (pin del preview) · G21 (Argon fuera del set managed) |
 | **Cerrado por evidencia en vivo** | G5 (techo de subida medido; leer la nota de la ventana de fair use más abajo) · G25 (research: HTTP 429, límite **0** tokens/min en free tier → nunca puede correr) · G26/G29/G30 (dependen de G25) |
 | **Descartado** | T15, streaming de `run`: el loop de function-calling no se intercala en un stream one-shot y `--background` ya cubre el problema real (drop de conexión) |
-| **Sigue abierto** | Techo de **descarga** sin medir (T27) · shards sin validar en vivo (T24) · corrida end-to-end de `--local-repo` y la decisión `--delete-env` (T25) · ruta GCS documentada con cero código. Nada de esto se anuncia como disponible sin prueba en vivo. |
+| **Sigue abierto** | shards sin validar en vivo (T24) · corrida end-to-end de `--local-repo` y la decisión `--delete-env` (T25) · ruta GCS documentada con cero código (aprobada para construir, odd L42). T27 ya está medido (v0.22.0). Nada de esto se anuncia como disponible sin prueba en vivo. |
 
 ## Cobertura doc `agent-environment` (auditoría 2026-11-05)
 

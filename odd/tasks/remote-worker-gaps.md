@@ -80,7 +80,7 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T8 | S2 | inline: G18 — probe `interactions.get`, then store/TTL behaviour | feat(get) |
 | T9 | S2 | probe + decide: G22 part b (AGENTS.md as inline source in `.agents/`) | feat(agents-md) |
 | T10 | S2 | inline: G11/G28 multimodal `--image` (single parts builder) | feat(multimodal) |
-| T11 | S2 | inline: G23 `--skill` inline sources | feat(skills) |
+| T11 | S2 | **closed as covered** — no `--skill` flag: a skill reaching the sandbox via the official channel `/.agents/skills/<n>/SKILL.md` already works with `--mount-file LOCAL:TARGET`; skills are a local-agent concept (installed by `skill-installer`), the remote worker does not consume them, and a flag could not lift the service's 1 MB/file · 2 MB total limit (L42) | docs(closing) |
 | T12 | S2 | probe + decide: G24 tools set for `run` (google_search) | feat(tools) |
 | T13 | S2 | inline: G12 server-side cancel | feat(cancel) |
 | T14 | S2 | writer candidate: G13 background + polling + SSE reconnect | feat(background) |
@@ -93,8 +93,8 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T21 | S10,S11 | inline, test-first: route table as a data module + `routes` command + the fair-use 400 mapped to an actionable message; delete the fake 1.5 GiB guard | feat(routes) 98ec5cc + v0.18.0 d03b5ab |
 | T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) e3b4ca7 + v0.19.0 622d3a2 |
 | T23 | S12 | inline, test-first: `probe` command | feat(probe) 25461f9 + v0.20.0 dfc60b4 |
-| T24 | S11 | **blocked** — live validation of sharded upload before it may be advertised; needs the user's quota OK | — |
-| T25 | S11 | **blocked** — live end-to-end `--local-repo` run + `--delete-env` decision; needs the user's quota OK | — |
+| T24 | S11 | **quota OK (L42)** — live validation of sharded upload before it may be advertised; standing recommendation on skip stands, the user chose to run it | — |
+| T25 | S11 | **quota OK (L42)** — live end-to-end `--local-repo` run; the `--delete-env` decision stays the user's (L42) | — |
 | T26 | S13,S14 | inline, test-first: the return path as a data table; expose `list`/fetch-one-file from the CLI (the client already has both); document the GitHub rejection and the unmeasured ceiling | feat(fetch) 3a71cac + v0.21.0 |
 | T27 | S14 | **DONE** — measured live 2026-11-07 with user quota OK: bytes generated INSIDE the sandbox (zero upload window), single-file 1 GiB pass / 2 GiB 504, tar 1 GiB 504 / 3.6 GiB 500, ~122 s deadline; measured numbers replaced the three `not measured` cells. Bonus defect found and fixed by the same live pass: `--list` read the wrong size field (`sizeBytes` vs the real `size_bytes`), and a wrong path in a live sandbox was reported as sandbox expiry | feat(return-measured) + fix(size-field) + fix(404-cause) |
 
@@ -555,11 +555,14 @@ en estas líneas y nada se aplasta.
 | 14 | fix `fetch`: campo de tamaño real (`size_bytes`) + causalidad del 404 (path vs expirado) | L40 · ee7b0e1, 0252556 | 0.21.2 |
 | 15 | T27: techo de bajada medido en vivo; celdas `not measured` reemplazadas por números con su error | T27 · (feat) + bump | 0.22.0 |
 | 16 | F1: tarea grabada `completed` aunque la bajada falló → estado `undelivered` + `clean` la protege + `continue` la rechaza + CLI imprime la recuperación | L41 · (fix) + bump | 0.22.1 |
+| 17 | T11/G23 cerrado como cubierto (docs) + decisiones de sesión (GCS aprobado para construir, OK cuota T24/T25) + la línea "Sigue abierto" del plan deja de presentar a T27 como sin medir | L42 · docs + bump | 0.22.2 |
 
-Lo que queda abierto después del slice 15, con su dueño: **T24** (validar shards
-en vivo) y **T25** (`--local-repo` end-to-end en vivo + decisión `--delete-env`).
-Ambos gastan la cuota del usuario y esperan su OK; ninguno se ofrece como ruta
-disponible hasta tener prueba en vivo.
+Lo que queda abierto, con su dueño (estado al L42): **T24** (validar shards en
+vivo) y **T25** (`--local-repo` end-to-end en vivo; la decisión `--delete-env`
+sigue siendo del usuario) — ambos con OK de cuota (L42), pendientes de
+ejecución; **gcs-source** aprobada para construir (L42: requiere el proyecto
+GCP + bucket del usuario); **ADR 0001** sigue pendiente del usuario
+(AGENTS.md §9). Ninguna ruta sin prueba en vivo se anuncia como disponible.
 
 **F1 (defecto nuevo, encontrado midiendo T27, dueño `run`):** cuando la bajada
 del tar falla (tar > ~1 GiB, o un workspace que el agente llenó de artefactos),
@@ -653,3 +656,27 @@ real + clone real). Suite 239/239.
   record; it was created before the fix and is left as-is (its sandbox still
   holds the 3.6 GiB if the user wants to recover it; `clean` now keeps it,
   which is the behaviour the old record was missing). Suite 239/239.
+
+- **L42** (decision) Session resume (2026-11-07, evening). The four open items
+  came back with decisions: (1) T11/G23 — the user delegated the disposition
+  to the parent's product judgment; (2) gcs-source — **approved to build**
+  (the user will provide the GCP project + bucket; live validation waits on
+  that); (3) T24 + T25 — quota OK for both live runs; (4) ADR 0001 — the user
+  asked what it was: it is the record of the decision made on 2026-11-04 that
+  aistudio-bridge is a standalone product, not a part of agy-model-bridge
+  (plan, Decision 1); per AGENTS.md §9 the human writes it; a draft offer was
+  pending at close of this entry.
+
+  **T11/G23 closed as covered** (no `--skill` flag): the capability G23 asked
+  for — a skill reaching the sandbox through the official inline channel
+  `/.agents/skills/<name>/SKILL.md` — already exists and works via
+  `--mount-file LOCAL:TARGET` (any text file, any target path; the gap index
+  has carried G23 as closed since v0.14.0 and T19's index re-confirmed it).
+  A dedicated flag would be new public CLI surface for a local-agent concept:
+  in this product the skill is installed LOCALLY by `skill-installer` so the
+  local agent learns to call the CLI — the remote Antigravity agent does not
+  consume the user's skill packs. And the sugar could not lift the service's
+  real constraint (1 MB per file, 2 MB total): a `--skill` flag would promise
+  what the service will not keep. The product's remaining value is on the GCS
+  route and the live validations, so no surface is spent on the convenience.
+  Docs-only close; no code touched.
