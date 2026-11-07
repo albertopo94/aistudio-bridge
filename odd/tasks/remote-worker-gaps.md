@@ -856,3 +856,11 @@ days; to release finished sandboxes: remote-worker clean`), which is
   the row stays "not validated live" (S11) and is not offered as an
   alternative until a real run says otherwise. No live API call was made; the
   only gcloud interaction was the fake stub in the R6 test.
+
+- **L50** (decision) The user decided NOT to use the GCS route personally:
+  creating a GCP account requires associating a payment card, and he will not
+  go that far — but he does not regret building the path and leaving it
+  documented in the README so another user can use it. The route stays
+  `not validated live` (S11); a live validation would need a real bucket from
+  someone, so it is parked. GCS is the only item left open besides the
+  ADR 0001 draft.
