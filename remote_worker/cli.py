@@ -107,8 +107,27 @@ def build_parser() -> argparse.ArgumentParser:
                             "is removed")
 
     sub.add_parser(
-        "routes", help="print every way code can reach the sandbox, with "
-                       "measured limits, so you can pick one")
+        "routes", help="print every way code can reach the sandbox and come "
+                       "back from it, with measured limits, so you can pick "
+                       "one")
+
+    fetch = sub.add_parser(
+        "fetch", help="read what a task left in its sandbox: list it, or take "
+                      "one file (run already brings the whole workspace back)")
+    fetch.add_argument("task_id")
+    fetch.add_argument("--list", action="store_true",
+                       help="list the entries under workspace (or under "
+                            "--path) without downloading anything")
+    fetch.add_argument("--path", default=None, metavar="PATH",
+                       help="without --list: this one file back from the "
+                            "sandbox; with --list: list under this path "
+                            "instead of workspace")
+    fetch.add_argument("--out", default=None, metavar="DEST",
+                       help="where to write it (default: the current "
+                            "directory); an existing file is left untouched "
+                            "unless --overwrite")
+    fetch.add_argument("--overwrite", action="store_true",
+                       help="replace the local file at --out if there is one")
 
     sub.add_parser(
         "probe", help="upload 1 MiB to a scratch sandbox and report whether "
@@ -163,6 +182,8 @@ def main(argv=None, *, runner=None) -> int:
         # Offline on purpose: the table is what you read to decide whether to
         # spend quota at all, so reading it must never need a key or a call.
         print(routes.format_routes())
+        print()
+        print(routes.format_return_routes())
         return 0
 
     if runner is None:
@@ -236,6 +257,27 @@ def main(argv=None, *, runner=None) -> int:
             ))
         if args.command == "clean":
             return _report_clean(runner.clean(apply=args.yes))
+        if args.command == "fetch":
+            if not args.list and not args.path:
+                parser.error("fetch needs --list to see what the sandbox holds "
+                             "or --path FILE to bring one file back "
+                             "(remote-worker fetch --help)")
+            if args.out and not args.path:
+                parser.error("--out needs --path: there is nothing to write "
+                             "in a plain --list")
+            if args.list:
+                return _report_fetch(
+                    runner.list_workspace(args.task_id,
+                                          path=args.path or "workspace"),
+                    listing=True)
+            dest = args.out
+            if dest is None:
+                dest = os.path.join(os.getcwd(),
+                                    os.path.basename(args.path.strip("/")))
+            return _report_fetch(
+                runner.fetch_file(args.task_id, args.path, dest,
+                                  overwrite=args.overwrite),
+                listing=False)
         if args.command == "probe":
             return _report_probe(runner.probe())
         if args.command == "status":
@@ -330,7 +372,7 @@ def _build_runner(parser, args):
     from .config import resolve_api_key
 
     needs_key = getattr(args, "command", None) in ("run", "ask", "continue",
-                                                   "clean", "probe")
+                                                   "clean", "probe", "fetch")
     wants_live = (getattr(args, "command", None) == "status"
                   and getattr(args, "live", False))
     api_key = resolve_api_key() or ""
@@ -501,6 +543,49 @@ def _report_live_status(runner, task_id: str) -> None:
     tokens = (interaction.get("usage") or {}).get("total_tokens")
     if tokens is not None:
         print(f"live tokens: {tokens}")
+
+
+def _report_fetch(result: dict, *, listing: bool) -> int:
+    """Report a read of the sandbox (S13).
+
+    The sizes come from whatever the service put in the listing: the files
+    endpoint documents a metadata object and this tool prints the size field
+    when the entry carries one, and says nothing when it does not, rather than
+    inventing a number for a field the response did not send.
+    """
+    if not result.get("ok"):
+        environment_id = result.get("environment_id")
+        if result.get("expired"):
+            print(f"read: expired -- the sandbox {environment_id} is gone "
+                  "(7-day TTL) and its files went with it", file=sys.stderr)
+            print("nothing to recover here: start a new run with the same "
+                  "repo and task, and read the result while the sandbox "
+                  "lives", file=sys.stderr)
+            return 3
+        print(f"read: refused -- the service answered "
+              f"{result.get('status')} {result.get('body')}", file=sys.stderr)
+        return 1
+
+    if listing:
+        entries = result.get("files") or []
+        if not entries:
+            print(f"nothing under {result.get('path')}")
+            return 0
+        for entry in entries:
+            path = entry.get("path") or entry.get("name") or "?"
+            size = entry.get("sizeBytes", entry.get("size"))
+            try:
+                size = human_bytes(int(size)) if size is not None else ""
+            except (TypeError, ValueError):
+                size = ""
+            print(f"  {path}" + (f"  {size}" if size else ""))
+        print(f"\n{len(entries)} entries under {result.get('path')}; one file "
+              "back with `remote-worker fetch "
+              f"{result.get('task_id')} --path <path>`")
+        return 0
+
+    print(f"wrote: {result['dest']} ({human_bytes(result['bytes'])})")
+    return 0
 
 
 def _report_probe(result: dict) -> int:

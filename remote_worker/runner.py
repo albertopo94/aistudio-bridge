@@ -635,6 +635,85 @@ class TaskRunner:
             return self.store.list()
         return self.store.get(task_id)
 
+    # --- reading the sandbox back (S13) ---------------------------------
+    #
+    # `run` always pulled the whole workspace as one tar, which is the right
+    # default for a task but a poor way to answer "what did it produce?" or
+    # "give me that one file": the whole tree moves for one file's answer.
+    # The client already had both granularities and nothing reached them; the
+    # two methods below are that reach.
+
+    def _fetch_target(self, task_id: str) -> tuple[dict, str]:
+        """The record and the sandbox to read, or why there is none.
+
+        Everything is resolved before a request goes out: an unknown task or a
+        task that never had a sandbox costs the user nothing and says which.
+        """
+        record = self.store.get(task_id)
+        environment_id = record.get("environment_id")
+        if not environment_id:
+            raise ValueError(
+                f"task {task_id} has no sandbox recorded, so there is nothing "
+                "to read: only a `run` mounts files (an `ask` task has no "
+                "workspace)"
+            )
+        return record, environment_id
+
+    @staticmethod
+    def _fetch_failure(exc: InteractionsError) -> dict:
+        """A refused read, with the sandbox expiry named as what it is (G9 shape).
+
+        A 404 here is almost never a typo: the sandbox is deleted after its
+        7-day life, and the bytes are gone with it. Saying "expired", and that
+        a new run is the way back, is the difference between a user re-running
+        the task and a user hunting a bug that does not exist.
+        """
+        return {"ok": False, "expired": exc.status == 404, "status": exc.status,
+                "body": exc.body}
+
+    def list_workspace(self, task_id: str, path: str = "workspace") -> dict:
+        """List what the sandbox holds, without downloading a single file."""
+        _, environment_id = self._fetch_target(task_id)
+        try:
+            entries = self.files.list_files(environment_id, path)
+        except InteractionsError as exc:
+            result = self._fetch_failure(exc)
+        else:
+            result = {"ok": True, "files": entries}
+        result.update({"task_id": task_id,
+                       "environment_id": environment_id, "path": path})
+        return result
+
+    def fetch_file(self, task_id: str, path: str, dest: str,
+                   *, overwrite: bool = False) -> dict:
+        """Bring back one file. ``dest`` is never overwritten unasked.
+
+        A file named here usually has a local cousin, and quietly replacing it
+        is the one way this read could damage the user's tree; refusing and
+        naming --out/--overwrite is cheaper than a lost file.
+        """
+        _, environment_id = self._fetch_target(task_id)
+        if os.path.isdir(dest):
+            # A directory is a drop target, not a file to replace.
+            dest = os.path.join(dest, os.path.basename(path.strip("/")))
+        if os.path.exists(dest) and not overwrite:
+            raise ValueError(
+                f"{dest} already exists and was left untouched: fetch a file "
+                "somewhere else with --out PATH, or say you mean it with "
+                "--overwrite"
+            )
+        try:
+            # recursive=False: this is one file, not a tree to tar.
+            written = self.files.download_to(environment_id, path, dest,
+                                             recursive=False)
+        except InteractionsError as exc:
+            result = self._fetch_failure(exc)
+        else:
+            result = {"ok": True, "bytes": written, "dest": dest}
+        result.update({"task_id": task_id, "environment_id": environment_id,
+                       "path": path})
+        return result
+
     def cancel(self, task_id: str) -> dict:
         record = self.store.get(task_id)
         # The local record is always canceled: that is the part this tool owns.

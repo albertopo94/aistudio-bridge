@@ -15,7 +15,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .routes import format_routes
+from .routes import format_return_routes, format_routes
 
 SKILL_NAME = "remote-worker"
 DEFAULT_ROOT = os.path.join(os.path.expanduser("~"), ".agents")
@@ -120,6 +120,27 @@ Before committing to a long upload, ask the user whether to run
 tells you whether the window is open right now. Suggest a route; let the user
 choose it. The CLI never asks him anything itself, so this choice is yours to
 put in front of him.
+
+## Getting files back out
+
+There is one transport out of a sandbox and the choice is granularity, not
+route. The table is the same one `remote-worker routes` prints:
+
+```
+""" + format_return_routes() + """
+```
+
+`run` already brings the workspace back and applies it to a branch, so use
+`fetch` only for the two questions that do not need the whole archive: "what did
+it produce?" (`--list`, metadata only) and "give me that one file" (`--path`).
+Never guess a path: list first, then fetch what the listing printed. Fetching
+into an existing local file needs `--overwrite`, so it cannot silently replace
+the user's work. A 404 means the sandbox expired and those bytes are gone — say
+so instead of retrying.
+
+Do not offer to push the result to the user's git host from here, and do not
+ask for a credential to do it: that route is refused by design (the row above),
+and the work is meant to end as a local branch the user reviews and pushes.
 
 ## Rules
 

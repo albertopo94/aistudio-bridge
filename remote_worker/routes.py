@@ -1,4 +1,4 @@
-"""The ways code can reach the sandbox, as data rather than as prose.
+"""The ways code can reach the sandbox, and come back from it, as data.
 
 The tool has more than one route into a sandbox and the best one changes with
 the time of day and with the user's own infrastructure (odd/tasks/
@@ -16,6 +16,13 @@ The table is read by two sides on purpose: the CLI renders it in its error
 messages, and the skill embeds the same rendered text so a local agent can
 present the same menu. The CLI itself never asks the user to choose: it prints
 the options, the human decides.
+
+``RETURN_ROUTES`` is the same treatment for the trip back (S13). It is shorter
+than the upload table because a sandbox is a filesystem with no memory of how
+it was filled: one transport, several granularities, and one route closed on
+purpose. Its ceilings say **not measured** because nobody measured them, and
+an invented number there would be the same failure class as the deleted
+1.5 GiB constant (S14).
 """
 
 from __future__ import annotations
@@ -29,6 +36,9 @@ STATUS_WORKS = "works"
 STATUS_UNVALIDATED = "not validated live"
 #: The route is documented by Google and this tool does not implement it.
 STATUS_NOT_BUILT = "not implemented here"
+#: The route is closed on purpose: it could be built, and this tool will not.
+#: It is listed so a reader finds the reason instead of wondering about it.
+STATUS_REFUSED = "refused by design"
 
 #: How recently the numbers below were measured, so a reader knows whether to
 #: trust them or re-run the probe.
@@ -99,12 +109,79 @@ ROUTES = (
     ),
 )
 
+#: The way back out of the sandbox, in the same fields as the way in (S13).
+#
+#: The symmetry with the upload table is a false friend and this table says so:
+#: there is one transport out (the Environments files endpoint) because a
+#: sandbox is a filesystem with no memory of how it was filled, so the axis
+#: here is **granularity**, not where the files live. The last row is a route
+#: this tool refuses, listed with its reason rather than left silent.
+RETURN_ROUTES = (
+    Route(
+        id="workspace-archive",
+        how="the whole workspace as one tar (what `run` does every time)",
+        ceiling="not measured: no ceiling is documented and none was observed",
+        speed="one request, whatever the size; the tar is read into memory",
+        needs="a task that mounted a workspace, and a sandbox inside its "
+              "7-day life",
+        status=STATUS_WORKS,
+    ),
+    Route(
+        id="workspace-listing",
+        how="remote-worker fetch <task> --list [--path DIR]",
+        ceiling="not measured: how many entries one call returns was never "
+                "observed",
+        speed="metadata only: no file content moves",
+        needs="the environment id of a task this tool recorded",
+        status=STATUS_WORKS,
+    ),
+    Route(
+        id="single-file",
+        how="remote-worker fetch <task> --path FILE [--out DEST]",
+        ceiling="not measured: the size one file may come back at was never "
+                "observed",
+        speed="one request for that file alone",
+        needs="the path as `--list` printed it; an existing local file needs "
+              "--overwrite",
+        status=STATUS_WORKS,
+    ),
+    Route(
+        id="push-to-git-host",
+        how="the sandbox pushing the result to your git host",
+        ceiling="not applicable: no bytes travel this way here",
+        speed="not measured, because this route is never taken",
+        needs="a credential with write access to your repositories inside the "
+              "sandbox, which this tool never puts there: the worker only "
+              "ever receives read access, and git truth stays on your machine",
+        status=STATUS_REFUSED,
+    ),
+)
+
 _FIELD_ORDER = ("ceiling", "speed", "needs", "status")
 
 
 def routes_by_id() -> dict:
     """The table keyed by id, for callers that need one row."""
     return {route.id: route for route in ROUTES}
+
+
+def return_routes_by_id() -> dict:
+    """The return table keyed by id, for callers that need one row."""
+    return {route.id: route for route in RETURN_ROUTES}
+
+
+def format_return_routes() -> str:
+    """The way back out, rendered exactly like the way in."""
+    width = max(len(route.how) for route in RETURN_ROUTES)
+    lines = []
+    for route in RETURN_ROUTES:
+        lines.append(route.how.ljust(width).rstrip())
+        for field in _FIELD_ORDER:
+            lines.append(f"    {field}: {getattr(route, field)}")
+        lines.append("")
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
 
 
 def alternatives_line(*, exclude: str | None = None) -> str:

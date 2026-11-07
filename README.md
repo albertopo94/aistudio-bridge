@@ -140,7 +140,9 @@ merges the result itself — review the branch, then merge it with your own git.
 | `cancel <task_id>` | Stop tracking a task locally, and ask the service to stop it too |
 | `clean` | List the sandboxes your account still holds (deletes nothing) |
 | `clean --yes` | Delete the ones no unfinished task is using |
-| `routes` | Print every way code can reach the sandbox, with measured limits (offline, no key) |
+| `routes` | Print every way code can reach the sandbox and come back from it, with measured limits (offline, no key) |
+| `fetch <task> --list` | List what the task left in its sandbox, without downloading anything |
+| `fetch <task> --path FILE` | Bring back that one file (`--out` to choose where, `--overwrite` to replace a local one) |
 | `probe` | Upload 1 MiB to a scratch sandbox and report whether your account can upload right now (~1 s, no task quota) |
 
 ## Models
@@ -351,6 +353,76 @@ upload 5242880/314572800 bytes at 1.4 MiB/s eta 3m31s
 upload 314572800/314572800 bytes at 1.5 MiB/s done in 3m22s
 ```
 
+### How the work comes back
+
+The way out has fewer routes than the way in, and that is not an oversight: a
+sandbox is a filesystem with no memory of how it was filled, so there is one
+transport out (the Environments files endpoint) and the real choice is
+**granularity**. `remote-worker routes` prints both tables; this is the second
+one:
+
+```
+the whole workspace as one tar (what `run` does every time)
+    ceiling: not measured: no ceiling is documented and none was observed
+    speed: one request, whatever the size; the tar is read into memory
+    needs: a task that mounted a workspace, and a sandbox inside its 7-day life
+    status: works
+
+remote-worker fetch <task> --list [--path DIR]
+    ceiling: not measured: how many entries one call returns was never observed
+    speed: metadata only: no file content moves
+    needs: the environment id of a task this tool recorded
+    status: works
+
+remote-worker fetch <task> --path FILE [--out DEST]
+    ceiling: not measured: the size one file may come back at was never observed
+    speed: one request for that file alone
+    needs: the path as `--list` printed it; an existing local file needs --overwrite
+    status: works
+
+the sandbox pushing the result to your git host
+    ceiling: not applicable: no bytes travel this way here
+    speed: not measured, because this route is never taken
+    needs: a credential with write access to your repositories inside the sandbox, which this tool never puts there: the worker only ever receives read access, and git truth stays on your machine
+    status: refused by design
+```
+
+`run` takes the first row for you: every completed run downloads the workspace,
+applies it to a fresh clone on a new branch and runs your tests before you look
+at it. `fetch` is for the other two questions — *what did it produce?* and *just
+give me that file* — which would otherwise cost the whole archive to answer:
+
+```bash
+remote-worker fetch t_1793818082 --list
+remote-worker fetch t_1793818082 --path workspace/app/tests/test_checkout.py
+```
+
+A listing moves metadata only, and neither command creates an interaction:
+reading bytes back is not a task, so it spends no task quota. A file lands in
+the current directory unless you say `--out`, and an existing local file is
+never replaced unless you say `--overwrite` — this is the one read that could
+damage your tree. If the sandbox already expired (7-day TTL) the read says so
+and exits `3`: those bytes are gone, and a new run is the only way back.
+
+Three ceilings in that table say **not measured**, and they are not lazy
+placeholders. No download ceiling is documented and none has been observed, so
+writing a number there would repeat the mistake of the 1.5 GiB upload constant
+— a figure that was true on the day it was measured and false the same evening.
+Measuring them honestly needs a large tree inside a sandbox first, which costs
+upload window or task quota; the cheap version only proves the small case.
+
+The last row is a route this tool refuses, stated with its reason instead of
+left as a surprise. "Can't Google just push the result to my GitHub?" is the
+most natural question about the return path, and the answer is no, on purpose:
+that would mean putting a credential with write access to your repositories
+inside a machine you do not control, where a persuasive README in the mounted
+repository is trying to be obeyed. AGENTS.md §8 fixes the rule — the worker
+never receives write credentials, git truth stays on your machine — so the tool
+never puts a write credential in the sandbox, the work ends as a local branch,
+and you review and push it with your own credentials. What your own agent does
+afterwards (`git push`, an API call to open a PR) is your setup's business: this
+tool neither does it, documents it as a feature, nor suggests it.
+
 ## Limits worth knowing
 
 **Two clocks expire, and confusing them costs you a task:**
@@ -393,8 +465,9 @@ and the fix is one constant in `remote_worker/runner.py`.
   life. `clean` shows what you hold; `clean --yes` deletes what no unfinished
   task is using. It lists the whole account's environments, not just the ones
   this tool created, and it never deletes one an unfinished task points at.
-- A `repository` source is capped at **500 MB** by the service. Larger
-  projects need the upload path (not implemented yet).
+- A `repository` source is capped at **500 MB** by the service. A tree that
+  large, or one with no URL the sandbox can reach, goes in by upload
+  (`--local-repo`).
 - A foreground request holds one connection for the whole task and gives up at
   600 seconds, losing the result in your terminal even though the sandbox kept
   working. For anything long, use `--background`: the service runs the task,
