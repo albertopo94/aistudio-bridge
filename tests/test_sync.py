@@ -140,6 +140,88 @@ class TestApplyToBranch(unittest.TestCase):
             )
 
 
+class StaleCloneTest(unittest.TestCase):
+    """F3: a clone left by an earlier task must never absorb a new delivery.
+
+    T25's live run found the shape: the clone lives at a fixed per-project
+    path, and `apply_to_branch` re-cloned only when the directory had no
+    `.git` -- so the branch of a task for repository B landed on a clone of
+    repository A (the worker-poc-toy PoC leftover), while the real
+    repository never received the branch. The user would merge unrelated
+    history and lose the delivery.
+    """
+
+    def setUp(self):
+        if apply_to_branch is None:
+            self.fail("RED: remote_worker.sync not implemented yet")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        # A repo that is NOT the delivery target (the stale one).
+        self.other = make_origin(self.tmp)
+        # The repo the delivery belongs to.
+        self.target = os.path.join(self.tmp, "target")
+        os.makedirs(self.target)
+        git(self.target, "init", "-q")
+        with open(os.path.join(self.target, "app.py"), "w") as fh:
+            fh.write("def greet():\n    return 'hi'\n")
+        git(self.target, "add", "app.py")
+        git(self.target, "commit", "-qm", "target initial")
+        self.clone = os.path.join(self.tmp, "clone")
+        subprocess.run([*GIT, "clone", "-q", self.other, self.clone],
+                       capture_output=True, text=True, check=True)
+        self.tar = self._delivery_tar()
+
+    def _delivery_tar(self):
+        path = os.path.join(self.tmp, "workspace.tar")
+        with tarfile.open(path, "w") as tar:
+            payload = b"def greet():\n    return 'hello'\n"
+            info = tarfile.TarInfo("target/app.py")
+            info.size = len(payload)
+            info.mode = 0o644
+            tar.addfile(info, io.BytesIO(payload))
+        return path
+
+    def _backups(self):
+        return [n for n in os.listdir(self.tmp) if n.startswith("clone.bak-")]
+
+    # The defect: the stale clone's origin is another repository.
+    def test_a_clone_of_another_repo_never_absorbs_the_delivery(self):
+        result = apply_to_branch(
+            tar_path=self.tar, repo_url=self.target,
+            branch="worker/f3", workdir=self.clone,
+        )
+        clone = result["clone_dir"]
+        origin = git(clone, "remote", "get-url", "origin").stdout.strip()
+        self.assertEqual(os.path.realpath(origin),
+                         os.path.realpath(self.target))
+        # The delivered content is in the working tree, on the target's
+        # history -- and the previous clone is kept, not silently destroyed.
+        with open(os.path.join(clone, "app.py")) as fh:
+            self.assertIn("hello", fh.read())
+        self.assertIn("hello", result["diff"])
+        backups = self._backups()
+        self.assertEqual(len(backups), 1, backups)
+        kept = git(os.path.join(self.tmp, backups[0]), "remote",
+                   "get-url", "origin").stdout.strip()
+        self.assertEqual(os.path.realpath(kept), os.path.realpath(self.other))
+
+    # The fast path stays fast: a clone of the same repo is reused.
+    def test_a_clone_of_the_same_repo_is_reused(self):
+        apply_to_branch(
+            tar_path=self.tar, repo_url=self.other,
+            branch="worker/one", workdir=self.clone,
+        )
+        apply_to_branch(
+            tar_path=self.tar, repo_url=self.other,
+            branch="worker/two", workdir=self.clone,
+        )
+        self.assertEqual(self._backups(), [])
+        origin = git(self.clone, "remote", "get-url", "origin").stdout.strip()
+        self.assertEqual(os.path.realpath(origin),
+                         os.path.realpath(self.other))
+
+
 class TestRunTests(unittest.TestCase):
     def setUp(self):
         if apply_to_branch is None:

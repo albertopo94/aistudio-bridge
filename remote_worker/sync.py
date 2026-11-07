@@ -16,6 +16,7 @@ branch is the user's decision.
 from __future__ import annotations
 
 import base64
+import datetime
 import io
 import os
 import shutil
@@ -176,12 +177,23 @@ def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
                     workdir: str, repo_dir: str | None = None) -> dict:
     """Apply a downloaded workspace tar onto a fresh clone, on a new branch.
 
+    "Fresh" is load-bearing: the clone path is per project and outlives a
+    task, so a clone of ANOTHER repository left there by an earlier run
+    must never absorb this delivery -- the branch would land on unrelated
+    history while the real repository never receives it (T25's live run
+    found exactly that, odd L45). A mismatched clone is kept under a dated
+    name (it may hold a branch nobody merged yet) and the right one is
+    cloned in its place.
+
     Returns ``{"clone_dir", "diff", "changed"}``. ``changed`` lists the
     ``git status --short`` lines so the caller can report what moved without
     re-running git.
     """
     clone = os.path.abspath(workdir)
-    if not os.path.isdir(os.path.join(clone, ".git")):
+    if not _clone_of(clone, repo_url):
+        if os.path.isdir(clone):
+            stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S-%f")
+            os.replace(clone, f"{clone}.bak-{stamp}")
         _git(None, "clone", "-q", repo_url, clone)
     _git(clone, "checkout", "-q", "-B", branch)
 
@@ -225,6 +237,25 @@ def run_tests(workdir: str, command: list[str],
 
 
 # --- internals ----------------------------------------------------------
+
+def _clone_of(clone: str, repo_url: str) -> bool:
+    """True only when this directory is a working copy of that exact repo."""
+    if not os.path.isdir(os.path.join(clone, ".git")):
+        return False
+    proc = subprocess.run(["git", "-C", clone, "remote", "get-url",
+                           "origin"], capture_output=True, text=True)
+    if proc.returncode != 0:
+        return False
+
+    def norm(value: str) -> str:
+        value = value.strip()
+        for suffix in (".git", "/"):
+            if value.endswith(suffix):
+                value = value[: -len(suffix)]
+        return os.path.realpath(value) if os.path.isabs(value) else value
+
+    return norm(proc.stdout) == norm(repo_url)
+
 
 def _git(cwd: str | None, *args: str) -> subprocess.CompletedProcess:
     argv = ["git", *args]
