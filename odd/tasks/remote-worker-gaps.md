@@ -559,15 +559,17 @@ en estas líneas y nada se aplasta.
 | 18 | F2: la protección de `clean` abarca TODAS las cuentas locales (cross-project) + corrección del claim falso en L41 | L43 · fix + bump | 0.22.3 |
 | 19 | Dos defectos del primer run en vivo de T25: el shape del `environment` en las rutas por id (L44) y el clone viejo que absorbía deliveries ajenos (L45) | L44, L45 · fix + bump | 0.22.5 |
 | 20 | `--delete-env`: borra el sandbox solo tras delivery verificado, y si no se pasa el flag, la pregunta (TTY) o el comando (agente) | L46 · feat + bump | 0.23.0 |
+| 21 | T24: ruta shards probada en vivo (PoC + row + README resinc) | L48 · poc + docs + bump | 0.23.1 |
 
 **Corte de review (L47):** los commits hasta `437cb9f` (0.22.1 → 0.22.5,
 T11/G23 + F2 + los dos defectos de T25) son la slice A; `--delete-env` y lo
 que siga (T24, GCS) abre la slice B. Si algún día se abre PR, se corta ahí.
+La slice B creció con T24 (hasta `52fbdcb`, 0.23.1); GCS la seguirá.
 
-Lo que queda abierto, con su dueño (estado al L47): **T24** (validar shards en
-vivo) — OK de cuota (L42), pendiente de ejecución; **gcs-source** aprobada
+Lo que queda abierto, con su dueño (estado al L48): **gcs-source** aprobada
 para construir (L42: requiere el proyecto GCP + bucket del usuario, y el
-setup se documenta para cualquier usuario que no lo tenga); **ADR 0001**
+setup se documenta para cualquier usuario que no lo tenga) — pendiente de
+build; **ADR 0001**
 tiene borrador en `docs/adr/` pendiente de la firma del usuario
 (AGENTS.md §9). T25 quedó cerrado en vivo (L47) y ninguna ruta sin prueba en
 vivo se anuncia como disponible.
