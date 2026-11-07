@@ -5,6 +5,34 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.21.2] — 2026-11-07
+
+### Fixed
+
+- `fetch <task> --list` printed paths with no sizes. The listing reader asked the
+  response for `sizeBytes`; the Environments files endpoint answers with
+  `size_bytes`. Verified live against 12 sandboxes still held by the account:
+  every entry carries `name`, `path`, `type`, `created`, `modified`, and files
+  additionally `mime_type` and `size_bytes`, while a `DIRECTORY` entry carries no
+  size at all. The reader now takes `size_bytes` first, and a directory prints no
+  size rather than borrowing one.
+- The test fixture for the listing had invented the same wrong field name, so the
+  rule was green while the command was broken. The fixture now mirrors the shape
+  the service returns, which is the only reason this was visible as a RED.
+- `fetch` no longer reports a wrong path as an expired sandbox. The files
+  endpoint answers the identical 404 body for "this path is not here" and "this
+  sandbox expired", and the old reader assumed the second: it told users to start
+  a new run (quota, and a branch, for nothing) while hiding the real fix. The two
+  are told apart by a root listing, which is metadata only, and the exit codes
+  separate (2 wrong path, 3 expired). When the root cannot be read the tool
+  declines to guess.
+
+### Documentation
+
+- Listing a path the sandbox does not have answers 404 with a readable message
+  (`Path 'works…' does not exist`), and listing an environment's root answers an
+  empty list rather than an error; both observed live, no code change needed.
+
 ## [0.21.1] — 2026-11-07
 
 ### Documentation
