@@ -1,8 +1,8 @@
 # 0001 — aistudio-bridge is a standalone product, not part of agy-model-bridge
 
-- Status: proposed — awaiting the user's sign-off (the decision is his; this
-  record drafts it for review, per AGENTS.md §9)
-- Date: decision 2026-11-04 · record drafted 2026-11-07
+- Status: accepted — signed off by the user on 2026-11-07 (the decision is
+  his; this record was drafted for review per AGENTS.md §9)
+- Date: decision 2026-11-04 · record drafted 2026-11-07 · accepted 2026-11-07
 
 ## Context
 

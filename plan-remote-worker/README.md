@@ -514,7 +514,7 @@ cada unidad (decisiones, RED/GREEN, hallazgos) vive en
 | G25 | **cerrado: no disponible** | Prueba en vivo: `deep-research-preview-04-2026` devuelve HTTP 429 "Rate limit exceeded for model deep-research-pro-preview (limit: 0 input tokens per minute on Free Tier)". El límite del free tier es literalmente 0, así que el modo nunca puede ejecutarse: implementarlo sería código muerto. Solo un tier pago lo habilita. |
 | G26 / G29 / G30 | cerrado por G25 | Dependen de research (store forzado, preguntas del plan, background); sin research no aplican |
 | T15 (streaming de `run`) | **descartado** | El loop de function-calling no se puede intercalar en un stream one-shot; `--background` cubre el problema real (drop de conexión) |
-| ADR 0001 | borrador pendiente de firma | Decisión standalone vs `agy-model-bridge`; borrador en `docs/adr/0001-standalone-product.md`, la firma es del usuario (AGENTS.md §9) |
+| ADR 0001 | **aceptado** | Decisión standalone vs `agy-model-bridge`; `docs/adr/0001-standalone-product.md` firmado por el usuario el 2026-11-07 (AGENTS.md §9) |
 
 ### Si algún día se habilita research (tier pago)
 

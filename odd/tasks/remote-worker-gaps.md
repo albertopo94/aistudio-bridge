@@ -567,13 +567,16 @@ T11/G23 + F2 + los dos defectos de T25) son la slice A; `--delete-env` y lo
 que siga (T24, GCS) abre la slice B. Si algún día se abre PR, se corta ahí.
 La slice B creció con T24 (hasta `52fbdcb`, 0.23.1); GCS la seguirá.
 
-Lo que queda abierto, con su dueño (estado al L49): **gcs-source** built
+Lo que queda abierto, con su dueño (estado al L51): **gcs-source** built
 (L49: requiere el proyecto GCP + bucket del usuario; el setup se documenta
 para cualquier usuario que no lo tenga) — validación en vivo pendiente del
-bucket, así que la fila queda "not validated live"; **ADR 0001**
-tiene borrador en `docs/adr/` pendiente de la firma del usuario
-(AGENTS.md §9). T25 quedó cerrado en vivo (L47) y ninguna ruta sin prueba en
-vivo se anuncia como disponible.
+bucket, así que la fila queda "not validated live". La decisión del usuario
+(2026-11-07, L50) es NO usar la vía en lo personal (crear cuenta GCP exige
+asociar una tarjeta y no quiere llegar a eso), pero el camino queda
+construido y documentado en el README para quien sí quiera usarlo; la
+validación en vivo solo ocurrirá si algún día alguien aporta el bucket.
+**ADR 0001** fue **aceptado** por el usuario el 2026-11-07 (L51). Con esto,
+el único item abierto del backlog es la validación en vivo de GCS.
 
 **F1 (defecto nuevo, encontrado midiendo T27, dueño `run`):** cuando la bajada
 del tar falla (tar > ~1 GiB, o un workspace que el agente llenó de artefactos),
@@ -864,3 +867,9 @@ days; to release finished sandboxes: remote-worker clean`), which is
   `not validated live` (S11); a live validation would need a real bucket from
   someone, so it is parked. GCS is the only item left open besides the
   ADR 0001 draft.
+
+- **L51** (decision) ADR 0001 **accepted** by the user on 2026-11-07. The
+  draft in `docs/adr/0001-standalone-product.md` (the standalone-vs-
+  agy-model-bridge decision of 2026-11-04) was reviewed against the code and
+  the plan and is faithful; its Status is now `accepted`. That was the last
+  open item besides the GCS live validation, which stays parked (L50).
