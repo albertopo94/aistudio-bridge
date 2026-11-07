@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.21.1] — 2026-11-07
+
+### Documentation
+
+- The plan's gap index stopped describing intentions and started describing the
+  repository. It had sorted G1–G30 by the priority each gap had on 2026-11-05, so
+  nine closed gaps still read as pending work; it is now grouped by *how* each one
+  closed (code / documentation / closed by live evidence / dropped), and the rows
+  that stayed say what is genuinely open — the unmeasured download ceiling,
+  unvalidated shards, the live `--local-repo` run and the `--delete-env` decision.
+- Two claims in the closing report contradicted the code and are corrected: `run
+  --local-repo` was credited with a guard against the measured upload ceiling, which
+  was deleted in 0.18.0 because a fixed number cannot describe a time-window limit;
+  and the upload ceiling was stated as a fact ("real ceiling 1.5 GiB"), which is the
+  number the fair-use measurement retracted the same evening it was taken.
+- No behavior changed: no source, test or CLI file is touched by this release.
+
 ## [0.21.0] — 2026-11-07
 
 ### Added
