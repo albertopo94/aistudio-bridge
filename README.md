@@ -127,6 +127,8 @@ merges the result itself — review the branch, then merge it with your own git.
 | `run "<task>" --repo <url> --background` | Same, but the service runs it and we poll — a dropped connection cannot lose the result |
 | `run "<task>" --repo <url> --reuse-env <id>` | Run in a sandbox you already have, keeping the dependencies an earlier task installed |
 | `run "<task>" --local-repo <path>` | Upload a local working tree instead of cloning a URL (see routes below) |
+| `run "<task>" --gcs-source gs://bucket/prefix` | Pull the tree from your own Cloud Storage bucket (2 GB per source, see below) |
+| `run "<task>" --gcs-source gs://bucket/prefix --gcs-token-file ./token` | Same, but hand the bearer token explicitly instead of asking gcloud (never printed) |
 | `run "<task>" --repo <url> --agents-file ./AGENTS.md` | Send your own AGENTS.md where the service reads it (`/.agents/AGENTS.md`) |
 | `run "<task>" --repo <url> --mount-file <local>:<target>` | Place a local text file inside the sandbox (repeatable) — skills, extra norms |
 | `run "<task>" --repo <url> --delete-env` | Delete the sandbox once the delivery is verified (`--local-repo` works too; a failed delivery always keeps it) |
@@ -287,6 +289,39 @@ window, not your repository — and which routes remain. The half-used sandbox
 from the failed attempt is released instead of sitting in your account for its
 7-day life.
 
+### A repository that lives in a bucket (GCS)
+
+`--gcs-source gs://bucket/prefix` points the sandbox at a tree you keep in a
+Cloud Storage bucket. The sandbox does not clone and does not upload: the
+service COPIES the tree out of your bucket into the sandbox at mount time (it
+is not a live mount), capped at **2 GB per source** (documented). Because no
+bytes leave your machine over the upload path, this is the route that escapes
+the account's fair-use upload window entirely.
+
+```bash
+remote-worker run "fix the flaky test" --gcs-source gs://my-bucket/my-project
+```
+
+A private bucket is read through the sandbox's egress proxy, which injects
+your own OAuth bearer on the wire: the product fetches `gcloud auth print-
+access-token` at run start (the token never enters the sandbox and is never
+printed), or you can hand it a token explicitly with `--gcs-token-file PATH`.
+A **public** bucket works with no credential at all.
+
+The token is short-lived (~60 min), but the mount happens at run start, so a
+long `--background` run is not affected.
+
+#### Setup for GCP novices
+
+You may not have a GCP project yet; none of this requires paying anything for
+the sizes this route is meant for. In order:
+
+1. **Create a GCP project** — in the console, or `gcloud projects create my-project`.
+2. **Create a bucket** — `gcloud storage buckets create gs://my-bucket --location=us-central1` (the agent docs set no region requirement).
+3. **Install `gcloud`, log in, and point at your project** — `gcloud auth login`, then `gcloud config set project my-project`.
+4. **Upload the tree** — `gcloud storage cp -r ./my-project gs://my-bucket/prefix/`.
+5. **Run** — `remote-worker run "..." --gcs-source gs://my-bucket/prefix`. For a private bucket the product fetches `gcloud auth print-access-token` at run start and injects it through the service's egress proxy; use `--gcs-token-file PATH` for an explicit token. A public bucket works with no credential.
+
 ### Which route gets your code there
 
 `remote-worker routes` prints this table, and it is the same text the tool
@@ -317,17 +352,17 @@ the archive split into parts, reassembled in the sandbox
     needs: the parts at distinct paths and one sandbox turn to concatenate them in order and unpack the archive. Proven live once (2026-11-07, poc/t24_shards.py): 3 parts, one turn, 35s and 44,903 tokens, and the extracted tree came back byte-identical to the source. Google still does not document this route, and no command of this tool runs it
     status: proven live in the PoC, not implemented here
 
-a Cloud Storage bucket as the environment source
-    ceiling: 2 GB (documented)
-    speed: ~5 min for 1.5 GiB on a 51 Mbps uplink
-    needs: your own GCP project, bucket and gsutil; the transport differs, so it is the route that escapes the upload window
-    status: not implemented here
+--gcs-source gs://bucket/prefix
+    ceiling: 2 GB (documented), per source — the service copies the tree at mount
+    speed: the service pulls from your bucket: no bytes leave your machine over the fair-use upload path
+    needs: a GCP project and bucket; for a private bucket, gcloud auth login (or --gcs-token-file); the setup steps are in README
+    status: not validated live
 ```
 
-The last two rows are listed because they are real options to weigh, not
-because this tool can run them: `shards` is proven live in the PoC
-(poc/t24_shards.py) and `gcs-source` needs a bucket of your own. Neither is
-offered as an alternative in an error message.
+The last row is listed because it is a real option to weigh, not because
+this tool can prove it works yet: `shards` is proven live in the PoC
+(poc/t24_shards.py) and `gcs-source` is built but waits on your bucket to
+run live. Neither is offered as an alternative in an error message.
 
 Since the window is only observable by attempting an upload, `remote-worker
 probe` attempts a small one: 1 MiB into a scratch sandbox, which it deletes on

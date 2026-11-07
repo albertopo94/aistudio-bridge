@@ -152,6 +152,30 @@ class GitError(RuntimeError):
     """A git command failed; the message carries its stderr."""
 
 
+def mount_gcs(uri: str, target: str) -> dict:
+    """Build the ``gcs`` source entry for an environment.
+
+    The service expects ``{"type": "gcs", "source": "gs://bucket/prefix",
+    "target": "/workspace/..."}`` and COPIES the tree into the sandbox at
+    mount time (docs/agent-environment); it is not a live mount. The
+    documented cap is 2 GB per gcs source, and target ``"/"`` is not
+    allowed. A uri that is not ``gs://`` or that has an empty bucket is
+    refused here with the exact problem, before any request.
+    """
+    if not uri or not uri.startswith("gs://"):
+        raise ValueError(f"a GCS source must be a gs:// uri, got {uri!r}")
+    rest = uri[len("gs://"):]
+    bucket = rest.split("/", 1)[0]
+    if not bucket:
+        raise ValueError(f"a GCS source needs a bucket, got {uri!r}")
+    if not target or not target.startswith("/") or target == "/":
+        raise ValueError(
+            f"target must be an absolute path inside the sandbox (not the "
+            f"root), got {target!r}"
+        )
+    return {"type": "gcs", "source": uri, "target": target}
+
+
 def mount_repo(source_url: str, target: str,
                size_bytes: int | None = None) -> dict:
     """Build the ``repository`` source entry for an environment.

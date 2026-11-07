@@ -566,10 +566,10 @@ T11/G23 + F2 + los dos defectos de T25) son la slice A; `--delete-env` y lo
 que siga (T24, GCS) abre la slice B. Si algún día se abre PR, se corta ahí.
 La slice B creció con T24 (hasta `52fbdcb`, 0.23.1); GCS la seguirá.
 
-Lo que queda abierto, con su dueño (estado al L48): **gcs-source** aprobada
-para construir (L42: requiere el proyecto GCP + bucket del usuario, y el
-setup se documenta para cualquier usuario que no lo tenga) — pendiente de
-build; **ADR 0001**
+Lo que queda abierto, con su dueño (estado al L49): **gcs-source** built
+(L49: requiere el proyecto GCP + bucket del usuario; el setup se documenta
+para cualquier usuario que no lo tenga) — validación en vivo pendiente del
+bucket, así que la fila queda "not validated live"; **ADR 0001**
 tiene borrador en `docs/adr/` pendiente de la firma del usuario
 (AGENTS.md §9). T25 quedó cerrado en vivo (L47) y ninguna ruta sin prueba en
 vivo se anuncia como disponible.
@@ -812,3 +812,46 @@ days; to release finished sandboxes: remote-worker clean`), which is
   `--budget` override the config file; deletes its environment on every exit
   path). Suite: 249/249 before the row change; the row change breaks that
   one README test and nothing else (see the failing command in the handoff).
+
+- **L49** (evidence, build — live pending) The `gcs-source` route was built
+  test-first offline, v0.23.1 → v0.24.0 (no bump, no commits — the parent
+  commits). A gcs Source is `{"type": "gcs", "source": "gs://bucket/prefix",
+  "target": "/workspace/..."}`; the service COPIES the tree into the sandbox
+  at mount time (not a live mount), capped at **2 GB per source**
+  (docs/agent-environment), and target `"/"` is not allowed. The sandbox
+  reads a PRIVATE bucket through its egress proxy, which injects the user's
+  own OAuth bearer on the wire — docs/agent-environment "Private sources":
+  an allowlist entry `{"domain": "storage.googleapis.com", "transform":
+  {"Authorization": "Bearer <token>"}}`, with `{"domain": "*"}` as the
+  documented catch-all when no user fence exists; a public bucket needs no
+  credential (no network block). There is NO Google service account to grant
+  IAM to: the token's identity (the user's gcloud account) reads the bucket,
+  so the happy path needs no grant step (aistudio.google.com api-reference
+  create-interaction + agent-credentials).
+
+  What landed: `sync.mount_gcs(uri, target)` (validates `gs://` and a
+  non-empty bucket, returns the exact entry); `cli.py` gained `--gcs-source`
+  in the same mutually-exclusive source group as `--repo`/`--local-repo`
+  (required-one-of-three) plus `--gcs-token-file`, a `--gcs-source`/
+  `--reuse-env` conflict (same shape as the `--local-repo` one), and a
+  `--no-network`+token-file guard (all SystemExit 2); `runner.run` gained
+  `gcs_source`/`gcs_token_file`, builds `sources = [mount_gcs(gs, /workspace/
+  <last-segment>)]`, resolves the token (file → else `gcloud auth
+  print-access-token`, timeout/rc/empty = silently no token = public path),
+  stores it only in memory (never printed or recorded), and injects the gcs
+  rule into the allowlist — appended to the user's rules with no wildcard,
+  or `[gcs_rule, {"domain": "*"}]` when no fence — raising ValueError if
+  `--no-network` meets a token. The gcs-source row in `routes.py` became a
+  built route (`how = "--gcs-source gs://bucket/prefix"`, `ceiling = "2 GB
+  (documented), per source — the service copies the tree at mount"`, `status
+  = STATUS_UNVALIDATED`), staying out of `alternatives_line()`; the README
+  gained a GCS section with the SETUP FOR GCP-NOVICES checklist and re-synced
+  its embedded route table. The suite ran 16 new tests in
+  `tests/test_gcs_source.py` (R1-R7) and updated assertions in
+  `tests/test_routes.py` (R8) for the new status/how; the README + skill
+  embed the re-rendered table verbatim (R9).
+
+  **Live validation is PENDING the user's bucket** (it does not exist yet):
+  the row stays "not validated live" (S11) and is not offered as an
+  alternative until a real run says otherwise. No live API call was made; the
+  only gcloud interaction was the fake stub in the R6 test.

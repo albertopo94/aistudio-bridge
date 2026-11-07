@@ -11,6 +11,7 @@ import base64
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tarfile
 import time
@@ -28,7 +29,7 @@ from .routes import (human_duration, human_rate, is_size_limit,
                      upload_failure_message)
 from .state import DEFAULT_ROOT, TaskStore, _slug, list_project_stores
 from .sync import (GitError, apply_to_branch, archive_repo, inline_source,
-                   mount_repo, run_tests, INLINE_TOTAL_LIMIT_BYTES)
+                   mount_gcs, mount_repo, run_tests, INLINE_TOTAL_LIMIT_BYTES)
 
 AGENT = "antigravity-preview-09-2026"
 DEFAULT_TEST_COMMAND = ["python3", "tests/test_main.py"]
@@ -92,6 +93,17 @@ def _expired_report(record: dict) -> str:
 def _repo_name(url: str) -> str:
     tail = urlsplit(url).path.rstrip("/").split("/")[-1] or "repo"
     return re.sub(r"\.git$", "", tail) or "repo"
+
+
+def _gcs_name(uri: str) -> str:
+    """The target name for a gcs source: the last non-empty path segment.
+
+    ``gs://bkt/tree`` -> ``tree``, ``gs://bkt`` -> ``bkt`` (the bucket name
+    when the prefix is empty). The bucket itself is already validated
+    non-empty by :func:`mount_gcs`.
+    """
+    parts = [p for p in uri[len("gs://"):].split("/") if p]
+    return parts[-1] if parts else ""
 
 
 class TaskRunner:
@@ -208,6 +220,46 @@ class TaskRunner:
             return False
         return True
 
+    def _gcs_token(self, gcs_token_file: str | None) -> str | None:
+        """The bearer token a private GCS bucket needs, or None (public path).
+
+        Resolved in order: the explicit file the user named, else ``gcloud
+        auth print-access-token``. A missing or empty file is a ValueError
+        that names the file -- the user pointed at a token and got none. A
+        gcloud that times out, fails, or prints nothing is the public-bucket
+        path and is silently treated as "no token": the request proceeds and
+        the service answers if the bucket is public.
+
+        The token lives only in memory here; it is never logged, printed, or
+        stored in the task record (AGENTS.md §2).
+        """
+        if gcs_token_file:
+            try:
+                with open(gcs_token_file, encoding="utf-8") as fh:
+                    value = fh.read().strip()
+            except OSError as exc:
+                raise ValueError(
+                    f"cannot read the GCS token file {gcs_token_file}: "
+                    f"{exc.strerror}"
+                ) from exc
+            if not value:
+                raise ValueError(
+                    f"the GCS token file {gcs_token_file} is empty"
+                )
+            return value
+        if not shutil.which("gcloud"):
+            return None
+        try:
+            proc = subprocess.run(
+                ["gcloud", "auth", "print-access-token"],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return None
+        return proc.stdout.strip()
+
     def run(self, *, task: str, repo_url: str | None = None,
             model: str | None = None,
             budget: int | None = None,
@@ -219,14 +271,18 @@ class TaskRunner:
             mount_files=None,
             images=None,
             local_repo: str | None = None,
-            delete_env: bool = False) -> dict:
+            delete_env: bool = False,
+            gcs_source: str | None = None,
+            gcs_token_file: str | None = None) -> dict:
         config = agent_config(model=model, budget=budget)
-        network = network_config(allow_domains=allow_domains,
-                                 no_network=no_network)
-        if local_repo is not None and repo_url is not None:
-            raise ValueError("pass either a repository URL or --local-repo")
-        if local_repo is None and repo_url is None:
-            raise ValueError("one of repo_url or --local-repo is required")
+        if gcs_source is not None and local_repo is not None:
+            raise ValueError("pass either --gcs-source or --local-repo, not both")
+        if gcs_source is not None and repo_url is not None:
+            raise ValueError("pass either --gcs-source or --repo, not both")
+        if local_repo is None and repo_url is None and gcs_source is None:
+            raise ValueError(
+                "one of repo_url, --local-repo or --gcs-source is required"
+            )
         if reuse_env is not None and not reuse_env.strip():
             raise ValueError("--reuse-env needs an environment id")
         if local_repo is not None:
@@ -235,9 +291,45 @@ class TaskRunner:
             # from afterwards, so git truth never leaves the machine.
             repo_url = os.path.abspath(local_repo)
             repo_name = _repo_name(os.path.basename(repo_url.rstrip("/")))
+        elif gcs_source is not None:
+            # The gs:// URI is what `status` should show for where the code
+            # came from; the sandbox COPIES the tree out of the bucket at
+            # mount time (docs/agent-environment), it is not a clone.
+            repo_url = gcs_source
+            repo_name = _gcs_name(gcs_source)
         else:
             repo_name = _repo_name(repo_url)
         repo_dir = f"/workspace/{repo_name}"
+        # A private bucket is read through the sandbox's egress proxy, which
+        # injects the user's own OAuth bearer on the wire (docs/agent-
+        # environment "Private sources"). The token comes from the file the
+        # user named, or from `gcloud auth print-access-token`; it lives only
+        # in memory here and is never printed or stored in the task record.
+        network = network_config(allow_domains=allow_domains,
+                                 no_network=no_network)
+        # A GCS bearer is only meaningful when the source is the user's own
+        # bucket; a repository or local-repo run must not inherit one, so the
+        # token is resolved only on the gcs path.
+        token = self._gcs_token(gcs_token_file) if gcs_source is not None else None
+        if token is not None:
+            # The documented rule for a private bucket: an allowlist entry
+            # that injects the bearer on storage.googleapis.com. With no user
+            # fence the docs add {"domain": "*"} as the catch-all; with a
+            # fence the gcs rule joins the user's rules and the fence stays
+            # a fence (no wildcard added).
+            gcs_rule = {
+                "domain": "storage.googleapis.com",
+                "transform": {"Authorization": f"Bearer {token}"},
+            }
+            if no_network:
+                raise ValueError(
+                    "--gcs-source with a token cannot be combined with "
+                    "--no-network"
+                )
+            if network is None:
+                network = {"allowlist": [gcs_rule, {"domain": "*"}]}
+            else:
+                network["allowlist"].append(gcs_rule)
         task_id = f"t_{int(time.time())}"
         branch = branch or f"worker/{repo_name}-{int(time.time())}"
 
@@ -249,7 +341,12 @@ class TaskRunner:
             memory_tools=self.memory_enabled,
         )
 
-        sources = [] if local_repo is not None else [mount_repo(repo_url, repo_dir)]
+        if gcs_source is not None:
+            sources = [mount_gcs(gcs_source, repo_dir)]
+        elif local_repo is not None:
+            sources = []
+        else:
+            sources = [mount_repo(repo_url, repo_dir)]
         sources.extend(self._inline_sources(agents_file=agents_file,
                                             mount_files=mount_files))
         upload_info = None

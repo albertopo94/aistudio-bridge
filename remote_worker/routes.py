@@ -125,12 +125,11 @@ ROUTES = (
     ),
     Route(
         id="gcs-source",
-        how="a Cloud Storage bucket as the environment source",
-        ceiling="2 GB (documented)",
-        speed="~5 min for 1.5 GiB on a 51 Mbps uplink",
-        needs="your own GCP project, bucket and gsutil; the transport differs, "
-              "so it is the route that escapes the upload window",
-        status=STATUS_NOT_BUILT,
+        how="--gcs-source gs://bucket/prefix",
+        ceiling="2 GB (documented), per source — the service copies the tree at mount",
+        speed="the service pulls from your bucket: no bytes leave your machine over the fair-use upload path",
+        needs="a GCP project and bucket; for a private bucket, gcloud auth login (or --gcs-token-file); the setup steps are in README",
+        status=STATUS_UNVALIDATED,
     ),
 )
 

@@ -201,7 +201,12 @@ class RouteTableTest(unittest.TestCase):
         # proof stays out of the alternatives an error message offers.
         self.assertEqual(by_id["shards"].status, routes.STATUS_PROVEN_POC)
         self.assertIn("poc/t24_shards.py", by_id["shards"].needs)
-        self.assertEqual(by_id["gcs-source"].status, routes.STATUS_NOT_BUILT)
+        # GCS is now a BUILT route, but nothing has run it live (it needs
+        # the user's bucket), so it must not be advertised as available:
+        # S11 keeps it unvalidated and out of the alternatives line.
+        self.assertEqual(by_id["gcs-source"].status, routes.STATUS_UNVALIDATED)
+        self.assertEqual(by_id["gcs-source"].how,
+                         "--gcs-source gs://bucket/prefix")
 
     def test_only_the_working_routes_are_offered_as_alternatives(self):
         offered = routes.alternatives_line()

@@ -51,6 +51,18 @@ def build_parser() -> argparse.ArgumentParser:
              "travels), which is the only way a local-only or oversized "
              "repository can reach it",
     )
+    source.add_argument(
+        "--gcs-source", metavar="gs://BUCKET/PREFIX",
+        help="mount a Cloud Storage bucket as the sandbox's repository: the "
+             "service COPIES the tree out of your bucket at mount time (up to "
+             "2 GB per source, documented), so no bytes leave your machine "
+             "over the upload path",
+    )
+    run.add_argument(
+        "--gcs-token-file", default=None, metavar="PATH",
+        help="read the GCS bearer token from this file instead of asking "
+             "gcloud; the value is never printed",
+    )
     run.add_argument(
         "--delete-env", action="store_true",
         help="delete the sandbox once the delivery is verified (the branch "
@@ -249,6 +261,15 @@ def main(argv=None, *, runner=None) -> int:
             if args.local_repo is not None and args.reuse_env is not None:
                 parser.error("--local-repo builds a fresh sandbox, so it "
                              "cannot be combined with --reuse-env")
+            if args.gcs_source is not None and args.reuse_env is not None:
+                parser.error("--gcs-source builds a fresh sandbox, so it "
+                             "cannot be combined with --reuse-env (a reused "
+                             "sandbox already has its own sources and "
+                             "network rules)")
+            if args.no_network and args.gcs_source is not None \
+                    and args.gcs_token_file is not None:
+                parser.error("--gcs-source with a token cannot be combined "
+                             "with --no-network")
             result = runner.run(
                 task=args.task, repo_url=args.repo, model=model,
                 budget=budget, branch=args.branch,
@@ -261,6 +282,8 @@ def main(argv=None, *, runner=None) -> int:
                 images=images,
                 local_repo=args.local_repo,
                 delete_env=args.delete_env,
+                gcs_source=args.gcs_source,
+                gcs_token_file=args.gcs_token_file,
             )
             code = _report_run(result)
             environment_id = result.get("environment_id")
