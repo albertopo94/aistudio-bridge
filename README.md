@@ -313,9 +313,9 @@ quotes in its own error messages, so the two cannot disagree:
 
 the archive split into parts, reassembled in the sandbox
     ceiling: the same fair use window: splitting does not raise it
-    speed: the same per-byte rate, plus one turn to reassemble
-    needs: an extra sandbox turn to concatenate and unpack the parts; Google does not document this route, so it is unproven
-    status: not validated live
+    speed: the same per-byte rate, plus one upload session per part and one turn to reassemble: 3 parts of 1.5 MiB took 32s (47 kB/s) against 1.1-1.6 MiB/s for a sustained direct upload
+    needs: the parts at distinct paths and one sandbox turn to concatenate them in order and unpack the archive. Proven live once (2026-11-07, poc/t24_shards.py): 3 parts, one turn, 35s and 44,903 tokens, and the extracted tree came back byte-identical to the source. Google still does not document this route, and no command of this tool runs it
+    status: proven live in the PoC, not implemented here
 
 a Cloud Storage bucket as the environment source
     ceiling: 2 GB (documented)
@@ -325,9 +325,9 @@ a Cloud Storage bucket as the environment source
 ```
 
 The last two rows are listed because they are real options to weigh, not
-because this tool can run them: `shards` has never been validated against the
-service and `gcs-source` needs a bucket of your own. Neither is offered as an
-alternative in an error message.
+because this tool can run them: `shards` is proven live in the PoC
+(poc/t24_shards.py) and `gcs-source` needs a bucket of your own. Neither is
+offered as an alternative in an error message.
 
 Since the window is only observable by attempting an upload, `remote-worker
 probe` attempts a small one: 1 MiB into a scratch sandbox, which it deletes on
@@ -349,8 +349,8 @@ branch on when it offers you a route.
 
 The service, not your connection, sets the pace: measured 1.1-1.6 MiB/s against
 a machine with a 51.86 Mbps uplink. Splitting an archive into parts does not
-raise the window, it would only make a long upload resumable — which is why it
-is not built yet.
+raise the window, it only makes a long upload resumable; the PoC proved the
+technique (poc/t24_shards.py), but no command of this tool runs it yet.
 
 Because that pace makes a large tree a multi-minute wait, `--local-repo` prints
 what the service has accepted so far, the rate measured from the upload itself,

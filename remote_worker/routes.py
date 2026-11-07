@@ -35,6 +35,10 @@ STATUS_WORKS = "works"
 #: The route is built but its limit was never observed against the real
 #: service, so it must not be advertised as available (S11).
 STATUS_UNVALIDATED = "not validated live"
+#: The technique was observed working against the real service, in a PoC and
+#: not in a command: a fact to weigh when choosing a route, never an
+#: alternative an error message can offer.
+STATUS_PROVEN_POC = "proven live in the PoC, not implemented here"
 #: The route is documented by Google and this tool does not implement it.
 STATUS_NOT_BUILT = "not implemented here"
 #: The route is closed on purpose: it could be built, and this tool will not.
@@ -103,11 +107,21 @@ ROUTES = (
     Route(
         id="shards",
         how="the archive split into parts, reassembled in the sandbox",
+        # Splitting the bytes does not change what the account may upload: the
+        # window is spent per byte either way (L29). What the live run proved
+        # is the technique, at 1.5 MiB in 3 parts -- not a ceiling, so nothing
+        # here is extrapolated to the sizes that would make shards worth it.
         ceiling="the same fair use window: splitting does not raise it",
-        speed="the same per-byte rate, plus one turn to reassemble",
-        needs="an extra sandbox turn to concatenate and unpack the parts; "
-              "Google does not document this route, so it is unproven",
-        status=STATUS_UNVALIDATED,
+        speed="the same per-byte rate, plus one upload session per part and "
+              "one turn to reassemble: 3 parts of 1.5 MiB took 32s (47 kB/s) "
+              "against 1.1-1.6 MiB/s for a sustained direct upload",
+        needs="the parts at distinct paths and one sandbox turn to "
+              "concatenate them in order and unpack the archive. Proven live "
+              "once (2026-11-07, poc/t24_shards.py): 3 parts, one turn, 35s "
+              "and 44,903 tokens, and the extracted tree came back "
+              "byte-identical to the source. Google still does not document "
+              "this route, and no command of this tool runs it",
+        status=STATUS_PROVEN_POC,
     ),
     Route(
         id="gcs-source",

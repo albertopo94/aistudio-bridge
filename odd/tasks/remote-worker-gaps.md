@@ -93,7 +93,7 @@ the whole backlog, work unit by work unit, on a feature branch.
 | T21 | S10,S11 | inline, test-first: route table as a data module + `routes` command + the fair-use 400 mapped to an actionable message; delete the fake 1.5 GiB guard | feat(routes) 98ec5cc + v0.18.0 d03b5ab |
 | T22 | S11 | inline, test-first: `run --local-repo` reports upload progress through the `on_progress` callback already in `UploadClient` | feat(upload-progress) e3b4ca7 + v0.19.0 622d3a2 |
 | T23 | S12 | inline, test-first: `probe` command | feat(probe) 25461f9 + v0.20.0 dfc60b4 |
-| T24 | S11 | **quota OK (L42)** — live validation of sharded upload before it may be advertised; standing recommendation on skip stands, the user chose to run it | — |
+| T24 | S11 | **DONE live (L48)** — sharded upload validated against the real service: 3 parts of 1.5 MiB uploaded, one turn reassembled and extracted them, and the tree came back byte-identical (35s, 44,903 tokens); the route's technique works, its ceiling remains the fair-use window, and it stays a PoC, not a command | poc/t24 + docs(L48) + row update |
 | T25 | S11 | **DONE live (L44-L47)** — `--local-repo` end-to-end proven on the real service: archive→upload→agent turn→tar→branch on a clone of the RIGHT repo (task t_1794074888, 87k/34k tokens across attempts); `--delete-env` implemented (opt-in, only after a verified delivery) with the ask observed live | fix + feat 0.23.0 |
 | T26 | S13,S14 | inline, test-first: the return path as a data table; expose `list`/fetch-one-file from the CLI (the client already has both); document the GitHub rejection and the unmeasured ceiling | feat(fetch) 3a71cac + v0.21.0 |
 | T27 | S14 | **DONE** — measured live 2026-11-07 with user quota OK: bytes generated INSIDE the sandbox (zero upload window), single-file 1 GiB pass / 2 GiB 504, tar 1 GiB 504 / 3.6 GiB 500, ~122 s deadline; measured numbers replaced the three `not measured` cells. Bonus defect found and fixed by the same live pass: `--list` read the wrong size field (`sizeBytes` vs the real `size_bytes`), and a wrong path in a live sandbox was reported as sandbox expiry | feat(return-measured) + fix(size-field) + fix(404-cause) |
@@ -768,3 +768,45 @@ days; to release finished sandboxes: remote-worker clean`), which is
   the fixture repo has no `tests/test_main.py` (the fixed DEFAULT_TEST_COMMAND
   the worker contract names); on a repo with tests the CLI reports their
   result (L46). T25 is DONE.
+
+- **L48** (evidence, live) T24 answered the only open question of the
+  `shards` route: does the technique work at all? Google does not document
+  split-upload-reassemble, and the ceiling claim was already measured
+  (L29), so the run spent the cheapest payload that could answer it: a
+  deterministic tree of 3 files (~1 MiB each, known sha256), archived to
+  1.5 MiB, split into 3 parts, each part uploaded with the product's own
+  `UploadClient.upload()` to `workspace/parts/part0..2`, and ONE interaction
+  (`antigravity-preview-09-2026`, the environment id as a bare string per
+  L44, `agent_config` from `planner.agent_config`, the procedure as
+  `system_instruction`: concatenate in order, extract, print
+  `sha256sum` of each file). **Verdict: WORKS** — run 1 (model
+  `gemini-4-argon`, the config default, 17,702 tokens, 33s) and run 2 (the
+  session's authorized model `gemini-3.8-flash`, `--budget 250000`,
+  **44,903 tokens, 35s**) both ended with the host's own read-back matching
+  the source: `FilesClient.download_to` of the 3 extracted files, hashed on
+  the host, 3/3 equal to the source sha256 (e.g. `alpha.txt
+  f6b7f0b3fa26e700903e…` on both sides). The agent's report showed the exact
+  commands: `cat /workspace/parts/part0 part1 part2 > archive.tar.gz`,
+  `tar -xzf … -C extracted`, `sha256sum /workspace/extracted/*` — all three
+  digests equal to the host's. Environment `dabc041167a2bfcd7c25d034a46bf5e5`
+  (run 2) deleted on exit; no service error on either run; the fair-use 400
+  never appeared, which is the expected absence, not evidence about the
+  ceiling. Costs that make the route a PoC, not a command: the upload took
+  32s for 1.5 MiB (47 kB/s — three resumable sessions at this size, far
+  under the 1.1-1.6 MiB/s a sustained direct upload holds), and the
+  reassembly turn cost 44,903 tokens for one `cat` and one `tar`. Nothing
+  here lifts the window (L29 stands): at sizes where shards would pay for
+  themselves the window is spent anyway, and the turn tax is per reassembly.
+  Consequence in the table: the `shards` row keeps its `how` verbatim (the
+  README embeds the rendered table) and its status becomes a new
+  `STATUS_PROVEN_POC = "proven live in the PoC, not implemented here"` —
+  proven is a fact to weigh, but the route has no command, so it stays out
+  of `alternatives_line()` exactly like `gcs-source`; `test_routes` now
+  pins the PoC reference in the row. The README's rendered table now shows
+  the new cells, which needed the README updated too — that file is outside
+  this task's edit surfaces, so the `tests/test_routes.py` failure
+  (`test_the_readme_embeds_the_rendered_table`) is the deliberate red the
+  parent resolves. Script: `poc/t24_shards.py` (stdlib only; `--model` and
+  `--budget` override the config file; deletes its environment on every exit
+  path). Suite: 249/249 before the row change; the row change breaks that
+  one README test and nothing else (see the failing command in the handoff).

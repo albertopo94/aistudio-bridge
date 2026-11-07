@@ -195,9 +195,12 @@ class RouteTableTest(unittest.TestCase):
         # limit (L29). A number here is the bug this task removes.
         self.assertIn("fair use", by_id["direct-upload"].ceiling)
         self.assertNotIn("GiB", by_id["direct-upload"].ceiling)
-        # Shards are not documented by Google and were never run: they may be
-        # listed, but only as unvalidated.
-        self.assertEqual(by_id["shards"].status, routes.STATUS_UNVALIDATED)
+        # Shards: proven live on 2026-11-07 (poc/t24_shards.py) -- 3 parts of
+        # 1.5 MiB, one turn, and a tree that came back byte-identical -- and
+        # still not a command this tool runs. The row must say both, and the
+        # proof stays out of the alternatives an error message offers.
+        self.assertEqual(by_id["shards"].status, routes.STATUS_PROVEN_POC)
+        self.assertIn("poc/t24_shards.py", by_id["shards"].needs)
         self.assertEqual(by_id["gcs-source"].status, routes.STATUS_NOT_BUILT)
 
     def test_only_the_working_routes_are_offered_as_alternatives(self):
