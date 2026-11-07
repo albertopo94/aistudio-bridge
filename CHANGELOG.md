@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.24.0] — 2026-11-07
+
+### Added
+
+- `run --gcs-source gs://bucket/prefix`: a fourth source route. The sandbox
+  copies the tree from a Cloud Storage bucket at mount time (documented
+  2 GB per source), so the upload is the user's gcloud job and never
+  touches the fair-use upload window. Private buckets work through the
+  service's egress proxy: the product resolves a bearer token
+  (`--gcs-token-file`, else `gcloud auth print-access-token`) and injects
+  it for `storage.googleapis.com` on the allowlist; the token stays in
+  memory, is never printed or recorded, and a public bucket needs no
+  credential at all. A user `--allow-domain` fence keeps its shape (the
+  GCS rule is added, no wildcard); a token with `--no-network` is a
+  usage error. The gcs-source row becomes a built route but stays
+  "not validated live" until a live run says otherwise (S11), and the
+  README carries a GCP-novice setup checklist (project, bucket, gcloud
+  auth, upload, run).
+
 ## [0.23.1] — 2026-11-07
 
 ### Changed

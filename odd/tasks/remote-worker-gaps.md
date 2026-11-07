@@ -560,6 +560,7 @@ en estas líneas y nada se aplasta.
 | 19 | Dos defectos del primer run en vivo de T25: el shape del `environment` en las rutas por id (L44) y el clone viejo que absorbía deliveries ajenos (L45) | L44, L45 · fix + bump | 0.22.5 |
 | 20 | `--delete-env`: borra el sandbox solo tras delivery verificado, y si no se pasa el flag, la pregunta (TTY) o el comando (agente) | L46 · feat + bump | 0.23.0 |
 | 21 | T24: ruta shards probada en vivo (PoC + row + README resinc) | L48 · poc + docs + bump | 0.23.1 |
+| 22 | GCS route: `run --gcs-source gs://bucket/prefix` construida offline (flag, wiring, token, docs de setup); queda "not validated live" hasta prueba en vivo | L49 · feat + bump | 0.24.0 |
 
 **Corte de review (L47):** los commits hasta `437cb9f` (0.22.1 → 0.22.5,
 T11/G23 + F2 + los dos defectos de T25) son la slice A; `--delete-env` y lo
