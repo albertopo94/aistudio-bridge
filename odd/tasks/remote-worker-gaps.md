@@ -556,6 +556,7 @@ en estas líneas y nada se aplasta.
 | 15 | T27: techo de bajada medido en vivo; celdas `not measured` reemplazadas por números con su error | T27 · (feat) + bump | 0.22.0 |
 | 16 | F1: tarea grabada `completed` aunque la bajada falló → estado `undelivered` + `clean` la protege + `continue` la rechaza + CLI imprime la recuperación | L41 · (fix) + bump | 0.22.1 |
 | 17 | T11/G23 cerrado como cubierto (docs) + decisiones de sesión (GCS aprobado para construir, OK cuota T24/T25) + la línea "Sigue abierto" del plan deja de presentar a T27 como sin medir | L42 · docs + bump | 0.22.2 |
+| 18 | F2: la protección de `clean` abarca TODAS las cuentas locales (cross-project) + corrección del claim falso en L41 | L43 · fix + bump | 0.22.3 |
 
 Lo que queda abierto, con su dueño (estado al L42): **T24** (validar shards en
 vivo) y **T25** (`--local-repo` end-to-end en vivo; la decisión `--delete-env`
@@ -653,9 +654,13 @@ real + clone real). Suite 239/239.
   local clone, not mocks, so the try/except cannot silently swallow delivery:
   the branch appears, the diff shows `main.py`, and the tar is cleaned up.
   The old evidence task t_1794045414 still shows `completed` in its state
-  record; it was created before the fix and is left as-is (its sandbox still
-  holds the 3.6 GiB if the user wants to recover it; `clean` now keeps it,
-  which is the behaviour the old record was missing). Suite 239/239.
+  record; it was created before the fix and is left as-is. Its sandbox
+  still holds the 3.6 GiB if the user wants to recover it, but because the
+  record reads `completed` (a finished status) `clean` treats that sandbox
+  as finished work: the F1 protection applies to tasks recorded
+  `undelivered` from now on, not to this pre-fix record (corrected L43:
+  the first draft claimed `clean` keeps it; a live dry run on 2026-11-07
+  showed it listed for deletion). Suite 239/239.
 
 - **L42** (decision) Session resume (2026-11-07, evening). The four open items
   came back with decisions: (1) T11/G23 — the user delegated the disposition
@@ -680,3 +685,21 @@ real + clone real). Suite 239/239.
   what the service will not keep. The product's remaining value is on the GCS
   route and the live validations, so no surface is spent on the convenience.
   Docs-only close; no code touched.
+
+- **L43** (defect) F2 found while preparing the storage-quota cleanup. The
+  T25 live run died on a new 429: "Project environment storage quota
+  exceeded" — the account's environment storage is full, and the 23 held
+  sandboxes (housekeeping since L41) are the cause. Preparing the `clean
+  --yes` that frees it, the dry run exposed the defect: `clean` lists
+  environments from the SERVICE side, which is account-scoped (the
+  Environments API has no per-project scope), but its protection set
+  (`in_use`) only read the CURRENT project's store. Running `clean` from
+  project A could therefore delete the sandbox of an UNFINISHED task in
+  project B. Live proof: `clean` from aistudio-bridge listed
+  `23a912d6ab17161af94ad26e33895e27` for deletion even though it belongs to
+  a `requires_action` task in the worker-poc-toy project. FIX (test-first,
+  rule 10 in tests/test_network_and_clean.py): the protection set is now
+  built from every local project store under the state root
+  (`list_project_stores` in state.py), so unfinished work is never offered
+  for deletion no matter which project the CLI runs from. This is what
+  makes the cleanup safe to run. Suite 241/241.

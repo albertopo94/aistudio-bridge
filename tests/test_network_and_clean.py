@@ -39,6 +39,11 @@ Rules under test:
    go and deletes nothing; ``--yes`` deletes.
 9. ``clean`` never touches an environment belonging to a task that is not
    finished — active work is protected even with ``--yes``.
+10. F2: the service lists environments per ACCOUNT, so rule 9 must hold
+    across every project this tool tracks, not only the one the CLI was
+    run from: an unfinished task in another project still owns a live
+    sandbox, and ``clean --yes`` from a different project must not delete
+    it.
 """
 
 import json
@@ -334,6 +339,78 @@ class CleanCommandTest(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn("env_done", combined)
         self.assertNotIn("Traceback", combined)
+
+
+class CleanCrossProjectProtectionTest(unittest.TestCase):
+    """F2: environments are account-scoped on the service side, so the
+    protection must span every local project store, not just the one the
+    CLI is run from."""
+
+    def setUp(self):
+        if cli is None:
+            self.fail("RED: remote_worker missing")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        # The CLI runs from project "alpha"...
+        self.store = TaskStore(project="alpha", root=self._tmp.name)
+        self.store.record({"task_id": "t_a_done", "status": "completed",
+                           "environment_id": "env_a_done"})
+        # ...but project "beta" has unfinished work in env_beta_active.
+        other = TaskStore(project="beta", root=self._tmp.name)
+        other.record({"task_id": "t_b_active", "status": "requires_action",
+                      "environment_id": "env_beta_active"})
+
+    def _runner(self, srv):
+        return TaskRunner(
+            project="alpha", api_key="AQ.k",
+            client=InteractionsClient(api_key="AQ.k", base_url=srv.base_url),
+            environments=EnvironmentsClient(api_key="AQ.k",
+                                            base_url=srv.base_url),
+            dispatcher=StubMemory(), store=self.store,
+            workdir=self._tmp.name,
+        )
+
+    # Rule 10: --yes from project alpha must spare beta's live sandbox.
+    def test_clean_protects_unfinished_work_in_other_projects(self):
+        with FakeInteractionsServer() as srv:
+            srv.reply_bytes = json.dumps(
+                {"environments": [
+                    _env("env_a_done"), _env("env_beta_active"),
+                    _env("stray_env"),
+                ]}).encode()
+            srv.delete_replies = [(200, b"{}"), (200, b"{}")]
+            out = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(io.StringIO()):
+                code = cli.main(["clean", "--yes"], runner=self._runner(srv))
+            deletes = [r["path"] for r in srv.requests
+                       if r["method"] == "DELETE"]
+        self.assertEqual(code, 0)
+        # Finished work in this project + the stray go; the other
+        # project's unfinished work stays.
+        self.assertEqual(deletes, ["/v1beta/environments/env_a_done",
+                                   "/v1beta/environments/stray_env"])
+        self.assertNotIn("/v1beta/environments/env_beta_active", deletes)
+        self.assertIn("env_beta_active", out.getvalue())
+
+    # Rule 10 also covers the dry run: the kept list is where the user sees
+    # the protection, so it must name the other project's active sandbox
+    # and must not offer it for deletion.
+    def test_clean_dry_run_keeps_other_projects_active_env(self):
+        with FakeInteractionsServer() as srv:
+            srv.reply_bytes = json.dumps(
+                {"environments": [_env("env_a_done"),
+                                  _env("env_beta_active")]}).encode()
+            out = io.StringIO()
+            with redirect_stdout(out), redirect_stderr(io.StringIO()):
+                code = cli.main(["clean"], runner=self._runner(srv))
+            methods = [r["method"] for r in srv.requests]
+        self.assertEqual(code, 0)
+        self.assertEqual(methods, ["GET"])
+        lines = out.getvalue().splitlines()
+        self.assertIn("would delete: env_a_done", lines)
+        self.assertNotIn("would delete: env_beta_active", lines)
+        self.assertIn("kept (a task is still using it): env_beta_active",
+                      lines)
 
 
 if __name__ == "__main__":

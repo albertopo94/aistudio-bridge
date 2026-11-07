@@ -26,7 +26,7 @@ from .planner import (agent_config, network_config, task_parts,
                       worker_contract)
 from .routes import (human_duration, human_rate, is_size_limit,
                      upload_failure_message)
-from .state import DEFAULT_ROOT, TaskStore, _slug
+from .state import DEFAULT_ROOT, TaskStore, _slug, list_project_stores
 from .sync import (GitError, apply_to_branch, archive_repo, inline_source,
                    mount_repo, run_tests, INLINE_TOTAL_LIMIT_BYTES)
 
@@ -628,7 +628,8 @@ class TaskRunner:
         of the 7-day TTL. Deletion is irreversible and the service has no
         per-project scope (these are the project's environments on the API
         side, not this tool's), so the default is a dry run and work that is
-        not finished is never touched.
+        not finished is never touched -- in ANY of the local project stores,
+        because the environment list is account-wide (F2).
         """
         ids, token = [], None
         # Bounded: a service that kept handing back the same token must not
@@ -648,7 +649,8 @@ class TaskRunner:
 
         in_use = {
             task.get("environment_id")
-            for task in self.store.list()
+            for store in list_project_stores(self.store.root)
+            for task in store.list()
             if task.get("environment_id")
             and task.get("status") not in self.FINISHED_STATUSES
         }

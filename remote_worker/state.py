@@ -20,6 +20,26 @@ def _slug(project: str) -> str:
     return clean or "default"
 
 
+def list_project_stores(root: str | None = None) -> list:
+    """One TaskStore per project directory that holds a state.json.
+
+    The service lists environments per account, not per project, so the
+    protection set for ``clean`` must be built from every local store,
+    not only the one the CLI was run from: an unfinished task in another
+    project still owns a live sandbox, and deleting it would lose work.
+    """
+    base = root or DEFAULT_ROOT
+    try:
+        names = sorted(os.listdir(base))
+    except FileNotFoundError:
+        return []
+    return [
+        TaskStore(project=name, root=base)
+        for name in names
+        if os.path.isfile(os.path.join(base, name, "state.json"))
+    ]
+
+
 class TaskStore:
     """Per-project task records, newest first."""
 
@@ -28,6 +48,7 @@ class TaskStore:
             raise ValueError("project is required")
         self.project = project
         base = root or DEFAULT_ROOT
+        self.root = base
         self._dir = os.path.join(base, _slug(project))
         self.path = os.path.join(self._dir, "state.json")
 
