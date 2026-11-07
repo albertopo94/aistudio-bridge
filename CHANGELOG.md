@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.22.4] — 2026-11-07
+
+### Changed
+
+- Docs only: ADR 0001 (aistudio-bridge as a standalone product, not part
+  of agy-model-bridge) now has a draft in `docs/adr/` for the user's
+  sign-off, and the plan lines pointing at it are updated.
+
 ## [0.22.3] — 2026-11-07
 
 ### Fixed
