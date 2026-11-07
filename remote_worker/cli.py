@@ -562,6 +562,17 @@ def _report_fetch(result: dict, *, listing: bool) -> int:
                   "repo and task, and read the result while the sandbox "
                   "lives", file=sys.stderr)
             return 3
+        if result.get("missing_path"):
+            # The sandbox is alive and holding files: the path is what is wrong.
+            print(f"read: no such path -- {result.get('path')} is not in the "
+                  f"sandbox {environment_id}, which is alive and holds:",
+                  file=sys.stderr)
+            for name in (result.get("present") or ["(nothing listed)"]):
+                print(f"  {name}", file=sys.stderr)
+            print("list it with `--list`, or point --path at one of the paths "
+                  "above; the sandbox is untouched, so nothing needs a re-run",
+                  file=sys.stderr)
+            return 2
         print(f"read: refused -- the service answered "
               f"{result.get('status')} {result.get('body')}", file=sys.stderr)
         return 1
@@ -573,7 +584,12 @@ def _report_fetch(result: dict, *, listing: bool) -> int:
             return 0
         for entry in entries:
             path = entry.get("path") or entry.get("name") or "?"
-            size = entry.get("sizeBytes", entry.get("size"))
+            # ``size_bytes`` is what the service answers with, verified live
+            # 2026-11-07 over 12 sandboxes; camelCase stays as a fallback for
+            # the JSON style the rest of this API sometimes uses. A DIRECTORY
+            # entry carries no size, so it prints no size.
+            size = entry.get("size_bytes", entry.get("sizeBytes",
+                                                     entry.get("size")))
             try:
                 size = human_bytes(int(size)) if size is not None else ""
             except (TypeError, ValueError):

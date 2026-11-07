@@ -659,17 +659,44 @@ class TaskRunner:
             )
         return record, environment_id
 
-    @staticmethod
-    def _fetch_failure(exc: InteractionsError) -> dict:
-        """A refused read, with the sandbox expiry named as what it is (G9 shape).
+    def _fetch_failure(self, exc: InteractionsError, environment_id: str) -> dict:
+        """A refused read, with the cause named only when it is actually known.
 
-        A 404 here is almost never a typo: the sandbox is deleted after its
-        7-day life, and the bytes are gone with it. Saying "expired", and that
-        a new run is the way back, is the difference between a user re-running
-        the task and a user hunting a bug that does not exist.
+        A 404 from this endpoint means one of two opposite things, and the
+        bodies are identical. Measured live 2026-11-07, against a sandbox that
+        expired and a sandbox holding 3.6 GiB:
+
+            Path 'workspace' not found in environment '...'.      (expired)
+            Path 'workspace/no-such-dir' not found in environment '...'.  (alive)
+
+        So the answer is not in the error. It is in whether the sandbox still
+        holds anything: a live one lists its root, an expired one answers an
+        empty listing. That is one metadata call, on a path the user already
+        failed, so it costs nothing worth naming.
+
+        Guessing expiry was not harmless: it told the user to start a new run,
+        which spends quota and a branch on a task whose sandbox was fine, and
+        it hid the real fix (the path they typed).
         """
-        return {"ok": False, "expired": exc.status == 404, "status": exc.status,
-                "body": exc.body}
+        result = {"ok": False, "status": exc.status, "body": exc.body,
+                  "expired": False, "missing_path": False}
+        if exc.status != 404:
+            return result
+        try:
+            held = self.files.list_files(environment_id, "")
+        except InteractionsError:
+            # Cannot tell the two apart: say so rather than pick one.
+            return result
+        if held:
+            result["missing_path"] = True
+            # The useful hint is what exists one level down, not the whole
+            # recursive tree: the user is looking for the path they mistyped.
+            top = {"/".join((e.get("path") or "").split("/")[:2])
+                   for e in held if e.get("path")}
+            result["present"] = sorted(p for p in top if p)[:20]
+        else:
+            result["expired"] = True
+        return result
 
     def list_workspace(self, task_id: str, path: str = "workspace") -> dict:
         """List what the sandbox holds, without downloading a single file."""
@@ -677,7 +704,7 @@ class TaskRunner:
         try:
             entries = self.files.list_files(environment_id, path)
         except InteractionsError as exc:
-            result = self._fetch_failure(exc)
+            result = self._fetch_failure(exc, environment_id)
         else:
             result = {"ok": True, "files": entries}
         result.update({"task_id": task_id,
@@ -707,7 +734,7 @@ class TaskRunner:
             written = self.files.download_to(environment_id, path, dest,
                                              recursive=False)
         except InteractionsError as exc:
-            result = self._fetch_failure(exc)
+            result = self._fetch_failure(exc, environment_id)
         else:
             result = {"ok": True, "bytes": written, "dest": dest}
         result.update({"task_id": task_id, "environment_id": environment_id,

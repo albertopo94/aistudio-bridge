@@ -24,6 +24,7 @@ Rules under test:
 import io
 import json
 import os
+import urllib.parse
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -41,19 +42,32 @@ ENVIRONMENT_ID = "env_fetch"
 
 
 def _file_entry(path, size):
-    return {"path": path, "sizeBytes": str(size)}
+    # The shape the service actually answers with, verified live 2026-11-07
+    # against 12 sandboxes: snake_case ``size_bytes``, and a DIRECTORY entry
+    # carries no size at all. A fixture inventing camelCase is how a broken
+    # reader passes its own test.
+    return {"path": path, "name": path.rsplit("/", 1)[-1], "type": "FILE",
+            "size_bytes": str(size)}
 
 class FakeFilesServer:
     """The Environments files endpoints: listing, one file, the whole tree."""
 
-    def __init__(self, entries=None, file_bytes=b"a = 1\n", get_status=200):
+    def __init__(self, entries=None, file_bytes=b"a = 1\n", get_status=200,
+                 get_body=b'{"error":{"message":"not found"}}',
+                 missing_path=None, dead=False):
         self.requests = []
+        self.missing_path = missing_path
+        # A dead sandbox does not 404 at the root: it answers the root listing
+        # with nothing, and 404s any path inside it. Measured live 2026-11-07
+        # against an environment that expired, side by side with a live one.
+        self.dead = dead
         self.entries = entries if entries is not None else [
             _file_entry("workspace/r/a.py", 12),
             _file_entry("workspace/r/README.md", 2048),
         ]
         self.file_bytes = file_bytes
         self.get_status = get_status
+        self.get_body = get_body
         self._server = None
         self._thread = None
 
@@ -76,9 +90,31 @@ class FakeFilesServer:
             def do_GET(self):
                 outer.requests.append({"method": "GET", "path": self.path,
                                        "body": b""})
+                want = urllib.parse.unquote(self.path).split("/files", 1)[-1]
+                want = want.split("?", 1)[0]  # the root carries ?recursive=true
+                if outer.dead and want.strip("/"):
+                    self._reply(404, b'{"error":{"code":"not_found"}}',
+                                {"Content-Type": "application/json"})
+                    return
+                if outer.dead:
+                    self._reply(200, b'{"files":[]}',
+                                {"Content-Type": "application/json"})
+                    return
+                if (outer.missing_path
+                        and outer.missing_path in urllib.parse.unquote(self.path)):
+                    # The exact shape the service answers live when the path is
+                    # wrong but the sandbox is alive.
+                    body = json.dumps({
+                        "error": {
+                            "message": f"Path '{outer.missing_path}' not found "
+                                       f"in environment 'env_fetch'.",
+                            "code": "not_found",
+                        }})
+                    self._reply(404, body.encode(),
+                                {"Content-Type": "application/json"})
+                    return
                 if outer.get_status >= 400:
-                    self._reply(outer.get_status,
-                                b'{"error":{"message":"not found"}}',
+                    self._reply(outer.get_status, outer.get_body,
                                 {"Content-Type": "application/json"})
                     return
                 if "alt=media" in self.path:
@@ -160,6 +196,24 @@ class FetchCommandTest(unittest.TestCase):
         self.assertIn("2", out)
         # Metadata only: not one byte of file content, no media request.
         self.assertNotIn("alt=media", " ".join(srv.method_paths()))
+
+    # Rule 4b. The size is the only thing in a listing that tells you whether
+    # to fetch one file or the tree, so it has to come from the field the
+    # service sends. Live 2026-11-07: entries carry ``size_bytes``; a reader
+    # asking for ``sizeBytes`` prints paths with no sizes and looks fine.
+    def test_the_listing_prints_the_size_the_service_reports(self):
+        with FakeFilesServer(entries=[
+                _file_entry("workspace/r/big.py", 4096),
+                {"path": "workspace/r/sub", "name": "sub", "type": "DIRECTORY"},
+        ]) as srv:
+            code, out, err = self._invoke(["fetch", "t1", "--list"], srv,
+                                          self._store())
+        self.assertEqual(code, 0, err)
+        self.assertIn("4.0 KiB", out)
+        # A directory has no size to print, and must not borrow one.
+        dir_line = [l for l in out.splitlines() if l.strip().endswith("sub")]
+        self.assertTrue(dir_line, out)
+        self.assertNotIn("KiB", dir_line[0])
 
     def test_list_can_be_scoped_to_a_path(self):
         with FakeFilesServer() as srv:
@@ -262,9 +316,34 @@ class FetchCommandTest(unittest.TestCase):
         self.assertIn("sandbox", out + err)
         self.assertEqual(srv.method_paths(), [])
 
+    # Rule 6b: a 404 is not proof of expiry. Verified live 2026-11-07: a wrong
+    # path in a sandbox that HOLDS 3.6 GiB answers the same 404 code and the
+    # same body shape as a sandbox that expired. Telling the user their sandbox
+    # died, when it is alive and their path is simply wrong, sends them to
+    # re-run a task they do not need to re-run. The two are told apart by a
+    # root listing, which is free (metadata, no quota).
+    def test_a_wrong_path_in_a_live_sandbox_is_not_reported_as_expiry(self):
+        with FakeFilesServer(missing_path="workspace/no-such-dir") as srv:
+            code, out, err = self._invoke(
+                ["fetch", "t1", "--list", "--path", "workspace/no-such-dir"],
+                srv, self._store())
+        text = out + err
+        self.assertNotEqual(code, 0, text)
+        self.assertNotIn("expired", text.lower())
+        self.assertNotIn("7-day", text)
+        self.assertIn("no such path", text.lower())
+        # What the sandbox does hold, one level down: enough to correct the
+        # path without dumping the whole recursive tree of a 61-entry sandbox.
+        self.assertIn("workspace/r", text)
+        # It is a fixable path, not a lost sandbox: no re-run advice.
+        self.assertEqual(code, 2, text)
+        # And the check that proved it costs metadata only.
+        self.assertTrue(any("files?" not in p and "alt=media" not in p
+                            for p in srv.method_paths()), srv.method_paths())
+
     # Rule 6: the sandbox expiring is a known event, not a traceback.
     def test_an_expired_sandbox_reads_as_expired(self):
-        with FakeFilesServer(get_status=404) as srv:
+        with FakeFilesServer(dead=True) as srv:
             code, out, err = self._invoke(["fetch", "t1", "--list"], srv,
                                           self._store())
         text = out + err
