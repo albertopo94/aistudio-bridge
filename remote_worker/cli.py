@@ -591,6 +591,10 @@ def _report_run(result: dict) -> int:
     if tests_rc is not None:
         verdict = "pass" if tests_rc == 0 else f"FAIL (rc {tests_rc})"
         print(f"tests:  {verdict}")
+        output = (result.get("tests_output") or "").strip()
+        if tests_rc != 0 and output:
+            # A red suite is where the diagnostics matter most.
+            print(output)
     elif result.get("tests_skipped"):
         print("tests:  not run (pass --run-tests to execute them locally)")
     print("nothing was pushed; merge the branch when you are ready.")

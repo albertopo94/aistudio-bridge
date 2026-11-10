@@ -212,20 +212,29 @@ def mount_repo(source_url: str, target: str,
     return {"type": "repository", "source": source_url, "target": target}
 
 
-def _delivery_pathspecs(clone: str, source_root: str) -> list[str]:
-    """Top-level paths this delivery owns (additions, edits, deletions).
+def _workspace_paths(source_root: str) -> list[str]:
+    """Every file path the delivered workspace holds, clone-relative.
 
-    Staging by pathspec keeps the user's own untracked files in the clone
-    out of the delivery commit: only workspace entries and paths tracked
-    at the base can land there.
+    Staging these EXACT paths is what keeps the delivery honest (S9): the
+    commit holds the workspace and nothing else. A user's scratch file in the
+    clone -- at the root or inside a tracked directory -- is never part of it,
+    and a file the workspace does not hold is already deleted by
+    :func:`_drop_removed`, so `git add` records the removal.
     """
-    names = {
-        name for name in os.listdir(source_root)
-        if name not in EXCLUDED_DIRS
-    }
-    for rel in _git(clone, "ls-files").stdout.splitlines():
-        names.add(rel.split("/")[0])
-    return sorted(names)
+    paths = []
+    for name in os.listdir(source_root):
+        if name in EXCLUDED_DIRS:
+            continue
+        top = os.path.join(source_root, name)
+        if os.path.isdir(top):
+            for root, dirs, files in os.walk(top):
+                dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
+                for one in files:
+                    full = os.path.join(root, one)
+                    paths.append(os.path.relpath(full, source_root))
+        else:
+            paths.append(name)
+    return sorted(paths)
 
 
 def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
@@ -266,10 +275,20 @@ def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
         _purge_artifacts(source_root)
         _drop_removed(clone, source_root)
         _overlay(source_root, clone)
-        pathspecs = _delivery_pathspecs(clone, source_root)
+        pathspecs = _workspace_paths(source_root)
 
     if pathspecs:
-        _git(clone, "add", "-A", "--", *pathspecs)
+        # No `-A`, no directory pathspec: git would sweep the user's own
+        # untracked files (at the root or inside a tracked directory) into
+        # the delivery commit. Staging the exact workspace paths keeps the
+        # commit honest (S9).
+        _git(clone, "add", "-f", "--", *pathspecs)
+    # Files the workspace no longer holds were removed from the working
+    # tree by _drop_removed but are not covered by _workspace_paths (they
+    # do not exist on disk); stage them by name so the deletion lands.
+    for rel in _git(clone, "ls-files").stdout.splitlines():
+        if not os.path.lexists(os.path.join(clone, rel)):
+            _git(clone, "add", "-f", "-A", "--", rel)
     diff = _git(clone, "diff", "--cached").stdout
     changed = [
         line for line in _git(clone, "status", "--short").stdout.splitlines()

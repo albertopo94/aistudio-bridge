@@ -523,3 +523,81 @@ class DeliveryFreshnessTest(unittest.TestCase):
         clone = os.path.join(self.tmp, "clone")
         count = git(clone, "rev-list", "--count", "worker/r1")
         self.assertEqual(count.stdout.strip(), "2")
+
+
+class DeliveryCommitScopeTest(unittest.TestCase):
+    """The delivery commit holds exactly the workspace, and nothing else.
+
+    Staging by top-level pathspec (S9) protects the user's untracked files
+    at the clone root, but a scratch file inside a TRACKED directory is
+    still swept into the commit: `git add -A` on a directory pathspec adds
+    whatever is untracked under it. The commit then turns a file the user
+    merely dropped in the clone into reviewed history.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = self._tmp.name
+        self.origin = make_origin(self.tmp)
+        package = os.path.join(self.origin, "package")
+        os.makedirs(package)
+        with open(os.path.join(package, "mod.py"), "w") as fh:
+            fh.write("VALUE = 1\n")
+        with open(os.path.join(self.origin, "del.py"), "w") as fh:
+            fh.write("OLD = True\n")
+        git(self.origin, "add", "-A")
+        git(self.origin, "commit", "-qm", "package + del")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    MAIN = "def add(a, b):\n    return a + b\n"
+
+    def _apply(self, files, branch, name):
+        path = os.path.join(self.tmp, name)
+        with tarfile.open(path, "w"):
+            pass
+        for rel, data in files.items():
+            add_member(path, f"worker-repo/{rel}", data=data)
+        return apply_to_branch(
+            tar_path=path, repo_url=self.origin, branch=branch,
+            workdir=os.path.join(self.tmp, "clone"),
+            repo_dir="worker-repo",
+        )
+
+    def test_user_scratch_inside_a_tracked_dir_is_not_committed(self):
+        first = self._apply({"main.py": self.MAIN,
+                             "package/mod.py": "VALUE = 2\n"}, "worker/r1",
+                            "ws1.tar")
+        scratch = os.path.join(first["clone_dir"], "package", "notes.md")
+        with open(scratch, "w") as fh:
+            fh.write("private\n")
+        self._apply({"main.py": self.MAIN, "del.py": "OLD = True\n",
+                     "package/mod.py": "VALUE = 3\n"}, "worker/r2",
+                    "ws2.tar")
+        shown = git(os.path.join(self.tmp, "clone"), "show", "--stat",
+                    "HEAD")
+        self.assertNotIn("notes.md", shown.stdout, shown.stdout)
+        self.assertTrue(os.path.exists(scratch),
+                        "the user's scratch file was deleted from the clone")
+        self.assertIn("VALUE = 3",
+                      git(os.path.join(self.tmp, "clone"), "show",
+                          "HEAD:package/mod.py").stdout)
+
+    def test_a_deletion_by_the_agent_still_reaches_the_commit(self):
+        # ws omits package/mod.py entirely: it must be deleted in the commit.
+        self._apply({"main.py": self.MAIN, "del.py": "OLD = True\n"},
+                    "worker/r1", "ws1.tar")
+        clone = os.path.join(self.tmp, "clone")
+        shown = git(clone, "show", "--stat", "HEAD")
+        self.assertIn("package/mod.py", shown.stdout, shown.stdout)
+        self.assertFalse(os.path.exists(os.path.join(clone, "package",
+                                                     "mod.py")))
+
+    def test_rerunning_the_same_branch_starts_clean(self):
+        self._apply({"main.py": self.MAIN, "package/mod.py": "VALUE = 2\n",
+                     "del.py": "OLD = True\n"}, "worker/r1", "ws1.tar")
+        self._apply({"main.py": self.MAIN, "package/mod.py": "VALUE = 2\n",
+                     "del.py": "OLD = True\n"}, "worker/r1", "ws2.tar")
+        clone = os.path.join(self.tmp, "clone")
+        self.assertEqual(git(clone, "status", "--short").stdout, "")
