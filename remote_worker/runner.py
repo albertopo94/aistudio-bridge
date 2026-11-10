@@ -157,14 +157,35 @@ class TaskRunner:
         self.workdir = workdir or os.path.join(
             DEFAULT_ROOT, _slug(project), "work"
         )
-        self.dispatcher = dispatcher or MemoryDispatcher(
-            EngramMemory(project=project)
-        )
+        # The dispatcher is the default when no memory is available at all
+        # (``memory_enabled=False``) or a caller-supplied double. A real task
+        # builds its OWN dispatcher per run/continue/ask (P0-2) so one task's
+        # ``--memory-save`` permission can never bleed into another's.
+        self._memory = EngramMemory(project=project)
+        self.dispatcher = dispatcher or MemoryDispatcher(self._memory)
         self.memory_enabled = memory_enabled
         # The watch of a background interaction (G13): 5s apart, 30 minutes
         # of reads by default, matching the service's own polling examples.
         self.poll_interval = poll_interval
         self.max_polls = max_polls
+
+    def _task_dispatcher(self, memory_save: bool):
+        """The dispatcher for one task, with that task's memory permission.
+
+        P0-2: memory permission must be immutable and per-task, so a task
+        can never change another's. A real (built-in) dispatcher is created
+        fresh per task from the project's memory with the task's
+        ``--memory-save`` flag; a caller-supplied double is already
+        task-scoped and is passed through untouched. Returns None when
+        memory is disabled, in which case the memory tools are not even
+        advertised.
+        """
+        if not self.memory_enabled:
+            return None
+        if self.dispatcher is not None and not isinstance(
+                self.dispatcher, MemoryDispatcher):
+            return self.dispatcher
+        return MemoryDispatcher(self._memory, allow_save=memory_save)
 
     @property
     def client(self):
@@ -311,7 +332,11 @@ class TaskRunner:
             self.files.download_to(environment_id, "workspace", tar_path)
             applied = apply_to_branch(
                 tar_path=tar_path, repo_url=repo_url, branch=branch,
-                workdir=os.path.join(self.workdir, "clone"),
+                # P0-2: each task applies into its OWN clone. A shared
+                # work/clone let two concurrent tasks race on the same
+                # directory (re-clone, branch reset, _drop_removed) and the
+                # delivery of one could land on the other's tree.
+                workdir=os.path.join(self.workdir, task_id, "clone"),
                 repo_dir=repo_name, base_commit=base_commit,
             )
         except (InteractionsError, InteractionsTimeoutError, GitError,
@@ -399,8 +424,9 @@ class TaskRunner:
             memory_save: bool = False,
             execute_tests: bool = False) -> dict:
         config = agent_config(model=model, budget=budget)
-        if self.memory_enabled:
-            self.dispatcher.allow_save = memory_save
+        # P0-2: a task-scoped dispatcher carries THIS task's memory
+        # permission; the shared self.dispatcher is never mutated.
+        dispatcher = self._task_dispatcher(memory_save)
         if gcs_source is not None:
             # P1-1: the gcs source route is disabled until it has a working
             # git return path. A gcs tree is not a git repository, so a
@@ -473,8 +499,8 @@ class TaskRunner:
         branch = branch or f"worker/{repo_name}-{task_id}"
 
         tools = [{"type": "code_execution"}]
-        if self.memory_enabled:
-            tools.extend(self.dispatcher.tool_specs())
+        if dispatcher is not None:
+            tools.extend(dispatcher.tool_specs())
         contract = worker_contract(
             project=self.project, repo_dir=repo_dir,
             memory_tools=self.memory_enabled,
@@ -548,13 +574,13 @@ class TaskRunner:
             "task": task,
         })
 
-        final = run_until_complete(self.client, self.dispatcher, interaction,
+        final = run_until_complete(self.client, dispatcher, interaction,
                                    system_instruction=contract, tools=tools,
                                    on_round=self._round_persister(task_id))
         if background:
             try:
                 final = wait_until_done(
-                    self.client, self.dispatcher, final,
+                    self.client, dispatcher, final,
                     poll_interval=self.poll_interval,
                     max_polls=self.max_polls,
                     system_instruction=contract, tools=tools,
@@ -703,8 +729,8 @@ class TaskRunner:
                 "continue"
             )
         config = agent_config(model=record.get("model"), budget=budget)
-        if self.memory_enabled:
-            self.dispatcher.allow_save = memory_save
+        # P0-2: task-scoped dispatcher for this continuation's permission.
+        dispatcher = self._task_dispatcher(memory_save)
         # G13: do not race a running interaction. Chaining to an interaction
         # the service still reports as running is a documented 400, and a
         # retry of it would fork a second branch of the conversation. Ask
@@ -760,8 +786,8 @@ class TaskRunner:
             repo_dir = "(no repository mounted)"
             tools = [{"type": "code_execution"}, {"type": "google_search"},
                      {"type": "url_context"}]
-        if self.memory_enabled:
-            tools.extend(self.dispatcher.tool_specs())
+        if dispatcher is not None:
+            tools.extend(dispatcher.tool_specs())
         contract = worker_contract(
             project=self.project, repo_dir=repo_dir,
             memory_tools=self.memory_enabled,
@@ -776,7 +802,7 @@ class TaskRunner:
                 system_instruction=contract,
                 tools=tools,
             )
-            final = run_until_complete(self.client, self.dispatcher,
+            final = run_until_complete(self.client, dispatcher,
                                        interaction,
                                        system_instruction=contract,
                                        tools=tools,
@@ -1126,14 +1152,14 @@ class TaskRunner:
         """
         config = agent_config(model=model, budget=budget)
         proj = project or self.project
-        if self.memory_enabled:
-            self.dispatcher.allow_save = memory_save
+        # P0-2: task-scoped dispatcher for this ask's permission.
+        dispatcher = self._task_dispatcher(memory_save)
         task_id = new_task_id()
 
         tools = [{"type": "code_execution"}, {"type": "google_search"},
                  {"type": "url_context"}]
-        if self.memory_enabled:
-            tools.extend(self.dispatcher.tool_specs())
+        if dispatcher is not None:
+            tools.extend(dispatcher.tool_specs())
         contract = worker_contract(
             project=proj, repo_dir="(no repository mounted)",
             memory_tools=self.memory_enabled,
@@ -1170,13 +1196,13 @@ class TaskRunner:
             "task": task,
         })
 
-        final = run_until_complete(self.client, self.dispatcher, interaction,
+        final = run_until_complete(self.client, dispatcher, interaction,
                                    system_instruction=contract, tools=tools,
                                    on_round=self._round_persister(task_id))
         if background:
             try:
                 final = wait_until_done(
-                    self.client, self.dispatcher, final,
+                    self.client, dispatcher, final,
                     poll_interval=self.poll_interval,
                     max_polls=self.max_polls,
                     system_instruction=contract, tools=tools,

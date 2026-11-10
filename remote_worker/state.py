@@ -8,6 +8,7 @@ is plain JSON so it can be read with any tool.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
@@ -89,6 +90,20 @@ class TaskStore:
 
     # --- writing ---------------------------------------------------------
 
+    def _lock(self):
+        """An exclusive cross-process lock around one read-modify-write.
+
+        ``record`` loads the whole ``state.json``, mutates one task, and
+        writes it back. Two processes doing that at the same time both read
+        the same snapshot and the last writer silently drops the other's
+        fields (P0-2). The lock serialises the whole critical section so no
+        update is lost -- and it also stops two processes racing on the
+        same ``.tmp`` rename path, which failed outright.
+        """
+        os.makedirs(self._dir, mode=0o700, exist_ok=True)
+        fd = os.open(self.path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+        return fd
+
     def record(self, task: dict, *, create: bool = False) -> dict:
         """Insert or merge one task record, keyed by ``task_id``.
 
@@ -97,26 +112,33 @@ class TaskStore:
         must never fuse two DIFFERENT tasks, so a caller that is CREATING a
         task passes ``create=True``: an id already owned by another
         interaction then refuses instead of overwriting a paid-for record
-        (hardening S5).
+        (hardening S5). The whole read-modify-write runs under a
+        cross-process lock (P0-2) so concurrent tasks never lose an update.
         """
         task_id = task.get("task_id")
         if not task_id:
             raise ValueError("task_id is required")
-        data = self._load()
-        existing = data["tasks"].get(task_id, {})
-        incoming = task.get("interaction_id")
-        owned = existing.get("interaction_id")
-        if create and owned and incoming and incoming != owned:
-            # Two different tasks share an id; report the collision instead
-            # of destroying a paid-for record.
-            raise ValueError(
-                f"task_id {task_id!r} already names another task "
-                f"(interaction {owned!r}, not {incoming!r})"
-            )
-        existing.update(task)
-        data["tasks"][task_id] = existing
-        self._save(data)
-        return existing
+        fd = self._lock()
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            data = self._load()
+            existing = data["tasks"].get(task_id, {})
+            incoming = task.get("interaction_id")
+            owned = existing.get("interaction_id")
+            if create and owned and incoming and incoming != owned:
+                # Two different tasks share an id; report the collision
+                # instead of destroying a paid-for record.
+                raise ValueError(
+                    f"task_id {task_id!r} already names another task "
+                    f"(interaction {owned!r}, not {incoming!r})"
+                )
+            existing.update(task)
+            data["tasks"][task_id] = existing
+            self._save(data)
+            return existing
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     # --- queries ---------------------------------------------------------
 

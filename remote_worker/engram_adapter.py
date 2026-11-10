@@ -112,11 +112,24 @@ class MemoryDispatcher:
     Reads are always available; writes need ``allow_save`` (the CLI's
     ``--memory-save``), and the tool is not even advertised without it, so a
     worker cannot be talked into a write the user never asked for.
+
+    ``allow_save`` is set once at construction and read-only afterwards
+    (P0-2): a task's memory permission is immutable and specific to that
+    task, so a concurrent task sharing infrastructure can never flip it.
     """
 
     def __init__(self, memory: EngramMemory, allow_save: bool = False):
         self._memory = memory
-        self.allow_save = allow_save
+        # Immutable per task (P0-2): a task-scoped permission is set once at
+        # construction and cannot be flipped by another task sharing a
+        # dispatcher. The runner builds a fresh dispatcher per task with the
+        # task's own flag instead of mutating a shared one.
+        self._allow_save = allow_save
+
+    @property
+    def allow_save(self) -> bool:
+        """Whether this dispatcher may persist memory writes. Read-only."""
+        return self._allow_save
 
     def tool_specs(self) -> list[dict]:
         """Declarations to pass as the ``tools`` entry of an interaction."""

@@ -73,7 +73,7 @@ task:   t_1793818082_a1b2c3d4
 status: completed
 tokens: 107105 of 200000
 branch: worker/aistudio-bridge-t_1793818082_a1b2c3d4
-clone:  ~/.remote-worker/aistudio-bridge/work/clone
+clone:  ~/.remote-worker/aistudio-bridge/work/t_1793818082_a1b2c3d4/clone
   M  README.md
   M  remote_worker/planner.py
 tests:  not run (pass --run-tests to execute them locally)
@@ -88,7 +88,7 @@ its tests means running its code on your machine.
 Then review and merge with your own git:
 
 ```bash
-cd ~/.remote-worker/<project>/work/clone
+cd ~/.remote-worker/<project>/work/<task-id>/clone
 git diff main
 ```
 

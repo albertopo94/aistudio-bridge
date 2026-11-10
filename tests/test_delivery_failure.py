@@ -229,15 +229,17 @@ class DeliveryFailureTest(unittest.TestCase):
         self.assertEqual(self.store.get(result["task_id"])["status"],
                          "completed")
         self.assertTrue(os.path.isdir(os.path.join(
-            self.tmp, "clone", ".git")), "no clone was made")
+            self.tmp, result["task_id"], "clone", ".git")),
+            "no clone was made")
         # S9: the delivery is a commit on its branch, so the index is clean
         # and the work is visible in history rather than staged forever.
+        clone = os.path.join(self.tmp, result["task_id"], "clone")
         shown = subprocess.run(
-            ["git", "-C", os.path.join(self.tmp, "clone"), "show",
+            ["git", "-C", clone, "show",
              "--stat", "--oneline", "HEAD"], capture_output=True, text=True)
         self.assertIn("main.py", shown.stdout)
         self.assertEqual(subprocess.run(
-            ["git", "-C", os.path.join(self.tmp, "clone"), "status",
+            ["git", "-C", clone, "status",
              "--short"], capture_output=True, text=True).stdout, "")
         # The workspace tar is transient: it does not accumulate per task.
         leftovers = [f for f in os.listdir(self.tmp)

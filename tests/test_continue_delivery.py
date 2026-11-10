@@ -97,7 +97,7 @@ class ContinueDeliversTest(unittest.TestCase):
             self._serve(srv)
             result = self._runner(srv).continue_task(task_id="t_cont")
         self.assertEqual(result["status"], "completed")
-        clone = os.path.join(self.tmp, "clone")
+        clone = os.path.join(self.tmp, "t_cont", "clone")
         self.assertTrue(os.path.isdir(os.path.join(clone, ".git")))
         log = subprocess.run(["git", "-C", clone, "log", "--oneline"],
                              capture_output=True, text=True)
@@ -114,8 +114,8 @@ class ContinueDeliversTest(unittest.TestCase):
             result = self._runner(srv).continue_task(task_id="t_cont")
         self.assertEqual(result["status"], "undelivered")
         self.assertEqual(self.store.get("t_cont")["status"], "undelivered")
-        self.assertFalse(os.path.isdir(os.path.join(self.tmp, "clone",
-                                                    ".git")))
+        self.assertFalse(os.path.isdir(os.path.join(self.tmp, "t_cont",
+                                                    "clone", ".git")))
 
     # Rule 3: the same tests policy as a run.
     def test_tests_are_not_run_unless_asked(self):
@@ -133,8 +133,8 @@ class ContinueDeliversTest(unittest.TestCase):
             self._serve(srv, final_status="incomplete", tar=False)
             result = self._runner(srv).continue_task(task_id="t_cont")
         self.assertEqual(result["status"], "incomplete")
-        self.assertFalse(os.path.isdir(os.path.join(self.tmp, "clone",
-                                                    ".git")))
+        self.assertFalse(os.path.isdir(os.path.join(self.tmp, "t_cont",
+                                                    "clone", ".git")))
         self.assertNotIn("clone_dir", self.store.get("t_cont"))
 
 
