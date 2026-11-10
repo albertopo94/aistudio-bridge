@@ -87,7 +87,7 @@ historial de cambios sincronizado con las versiones publicadas.
 | T2 | P0-3 | corregir afirmación/protección de `--run-tests` (docs + mensaje) | 4aa6bb1 |
 | T3 | DOC-1 | sincronizar CHANGELOG hasta v0.25.7 | c16fc85 |
 | T4 | P1-1 | completar o desactivar la ruta GCS | 9c895ca |
-| T5 | P0-2 | aislar tareas concurrentes | — |
+| T5 | P0-2 | aislar tareas concurrentes | 94e950e |
 | T6 | P1-2 | retorno incremental de workspaces grandes | — |
 | T7 | D-1 | idempotencia de llamadas a funciones | — |
 | T8 | D-2 | reconciliación de interacciones completadas | — |
@@ -111,3 +111,23 @@ afirmación de `--run-tests` (el entorno reducido NO es un sandbox: corre con el
 mismo usuario y con red). T3 agrega 0.25.6 y 0.25.7 al CHANGELOG. T4 desactiva
 `--gcs-source` (rechaza en lanzamiento; la tabla de rutas lo marca
 `STATUS_DISABLED`) hasta que tenga retorno git.
+
+L4 (2026-11-10): T5 cerrado en 94e950e (feat(sync)). Suite 314 OK. Test-first:
+5 tests nuevos en tests/test_concurrency_isolation.py (todos observados RED
+antes). Implementa las cuatro condiciones de P0-2: (1) cada entrega aplica en
+su propio clon `work/<task-id>/clone` (antes: `work/clone` compartido, race de
+re-clone/reset/_drop_removed); (2) `TaskStore.record` corre su read-modify-write
+bajo `flock` exclusivo sobre un lockfile lateral — el test multiproceso (4
+procesos escribiendo el mismo state.json) mostraba pérdida de records y un
+FileNotFoundError en el rename .tmp; (3) `MemoryDispatcher.allow_save` es
+inmutable (property de solo lectura) y el runner arma un dispatcher por tarea
+(`_task_dispatcher`), así el `--memory-save` de una tarea no contamina a otra
+(test de no-bleed: dos tasks con flags opuestos en el MISMO runner); (4)
+reconciliación de trabajos activos: el store durablo, escrito bajo lock, es la
+única fuente de verdad y ninguna flag en memoria se comparte entre tareas.
+Afectados: README (rutas de clon), tests de entrega existente (ruta por
+Tarea). Riesgo: item 4 (concurrencia).
+
+L5 (2026-11-10): boundary de slice: la rama acumula ~1.4k líneas desde main
+(8 commits, T1–T5). Entrega: rama local feature; push/PR sigue siendo decisión
+del usuario (decisión del cierre anterior). Quedan T6–T8.

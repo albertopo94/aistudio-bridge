@@ -5,6 +5,35 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [Unreleased]
+
+### Added
+
+- `run` and `continue` now record the exact commit the sandbox received
+  (`base_commit`) and deliver against THAT point instead of the remote ref
+  as of delivery time: a branch that advanced while the agent worked no
+  longer silently absorbs the delivery, and the result reports `base_moved`
+  when the live line moved (P0-1).
+
+### Changed
+
+- Concurrent tasks no longer share a delivery workspace: each task applies
+  its workspace into its own clone under `work/<task-id>/clone`, so two
+  tasks of the same project can no longer race on one shared clone (P0-2).
+- Task state writes are serialized under a cross-process lock: two processes
+  updating `state.json` at the same time can no longer drop each other's
+  records, and they can no longer collide on the temp rename (P0-2).
+- A task's `--memory-save` permission is now immutable and specific to that
+  task: the runner builds a per-task dispatcher instead of mutating a
+  shared one, so one task can never change another task's memory writes
+  (P0-2).
+- `--gcs-source` is disabled until it has a working git return path: the
+  flag now refuses up front with an explanation instead of ending
+  `undelivered` after a paid run (P1-1).
+- `--run-tests` help and report no longer describe the reduced environment
+  as a sandbox: it runs as the local user with network access; the reduced
+  env only bounds the variables the tests see (P0-3).
+
 ## [0.25.7] — 2026-11-10
 
 ### Documentation
