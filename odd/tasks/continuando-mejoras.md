@@ -136,6 +136,15 @@ L6 (2026-11-10): cierre de sesión. El usuario pidió cerrar y reiniciar: rama
 `feat/continuando-mejoras` mergueada a `main` (fast-forward cc5789c→d594056,
 v0.26.0) y pusheada a GitHub. Working tree limpio.
 
+L7 (2026-11-10, sesión 2): arrancó rama `feat/retorno-recuperacion` desde
+main. Cerrado el follow-up de P0-1 (L2): `base_moved` se reporta ahora en el
+CLI — `feat(cli)` f1497d4, v0.26.1→0.27.0. Test-first: `test_completed_warns_when_base_branch_moved`
+y `test_status_reports_base_moved_when_present` en tests/test_cli.py (ambos
+observados RED). `_report_run` imprime una advertencia cuando `base_moved` es
+True y `_report_status` imprime la clave cuando está registrada. Suite 316 OK
+(antes del bump, sin cambio de comportamiento adicional). Resto de la sesión:
+T6, T7, T8.
+
 PENDIENTE PARA LA SIGUIENTE SESIÓN (en este orden recomendado):
 - T6 · P1-2 — retorno incremental de workspaces grandes. Integrar un retorno
   por archivos (tipo `fetch --path`) cuando el TAR completo no sea viable
@@ -148,7 +157,7 @@ PENDIENTE PARA LA SIGUIENTE SESIÓN (en este orden recomendado):
   hoy, si la interacción ya terminó, se crea otra interacción nueva con
   `continue`; debe recuperar el resultado y entregarlo (`_deliver()`) en vez
 de re-pagar.
-- Follow-up P0-1 (L2): reportar `base_moved` en el CLI/status (hoy solo queda
-  en el resultado y el store).
+- [x] Follow-up P0-1 (L2): reportar `base_moved` en el CLI/status — cerrado
+  en f1497d4 (feat(cli), sesión 2, rama feat/retorno-recuperacion, L7).
 - La rama feature quedó en main; el branch local `feat/continuando-mejoras`
   se mantiene (igual que `feat/hardening`), no se borró.
