@@ -114,3 +114,11 @@ This feature fixes the surviving findings, one work unit at a time.
   Deviation from AGENTS §3 noted to the user: each task was treated as its
   own work unit (one bump each) so native review can take a single finding
   alone, instead of one bump for the whole feature.
+- **L7** (verifier, 2026-11-10) Independent verifier (gentle-ai-verify) passed
+  all 12 specs (S1-S12), suite 305 OK, own probes in scratch, and found one
+  real defect in S9: `git add -A` on a directory swept a user's untracked
+  scratch file inside a tracked dir into the delivery commit. Fixed in
+  b18cdbf + e2c98dd (0.25.6): staging is the exact workspace paths plus the
+  tracked files the workspace no longer holds, so the commit holds the
+  workspace and nothing else. Also surfaced the failing test output in the
+  report. Final suite: 308 OK. All hardening tasks closed.
