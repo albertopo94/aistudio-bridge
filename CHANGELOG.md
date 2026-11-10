@@ -5,6 +5,30 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.25.7] — 2026-11-10
+
+### Documentation
+
+- The feature document records the independent verifier's finding on the S9
+  delivery scope and the closing fix (odd/tasks/hardening.md).
+
+## [0.25.6] — 2026-11-10
+
+### Fixed
+
+- The delivery commit no longer sweeps a user's scratch file out of a TRACKED
+  directory. Staging by top-level pathspec protected untracked files at the
+  clone root, but a file dropped inside a tracked directory (a notes file, a
+  scratch file) was still swept in, because `git add -A` on a directory adds
+  whatever is untracked under it — turning that scratch file into reviewed
+  history a reviewer could merge by mistake. The delivery now stages the exact
+  file paths the workspace holds, plus the tracked files the workspace no
+  longer holds (by name), so the commit holds the workspace and nothing else
+  (found by the independent verifier after the S9 fix).
+- `--run-tests` now surfaces the failing test output: the report printed
+  `tests: FAIL (rc N)` and nothing else, so a red run gave no diagnostic. It
+  now shows what failed.
+
 ## [0.25.5] — 2026-11-10
 
 ### Documentation
