@@ -135,6 +135,50 @@ def _quote_path(path: str) -> str:
     return urllib.parse.quote(path.strip("/"), safe="/")
 
 
+#: Bound for one streamed read (P1-2): big enough to keep the request loop
+#: cheap, small enough that a multi-GiB workspace never lands whole in RAM.
+DOWNLOAD_CHUNK_BYTES = 1 << 20
+
+
+def _send_to_file(url: str, api_key: str, timeout: float, dest: str) -> int:
+    """Stream one GET response body straight to ``dest``.
+
+    Same error mapping as :func:`_send`, but the body is never held whole
+    in memory: each chunk lands on disk as it arrives (P1-2). Returns the
+    number of bytes written. The destination file only exists once the
+    request itself succeeded, like the buffered path it replaces.
+    """
+    headers = {"x-goog-api-key": api_key}
+    request = urllib.request.Request(url, method="GET", headers=headers)
+    written = 0
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            parent = os.path.dirname(os.path.abspath(dest))
+            os.makedirs(parent, exist_ok=True)
+            with open(dest, "wb") as fh:
+                while True:
+                    chunk = resp.read(DOWNLOAD_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    written += len(chunk)
+    except TimeoutError as exc:
+        raise InteractionsTimeoutError(
+            f"timeout: no response after {timeout}s calling {url}"
+        ) from exc
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise InteractionsError(exc.code, raw) from exc
+    except urllib.error.URLError as exc:
+        cause = str(exc.reason)
+        if "timeout" in cause.lower():
+            raise InteractionsTimeoutError(
+                f"timeout: no response after {timeout}s calling {url}"
+            ) from exc
+        raise InteractionsError(0, f"network error: {cause}") from exc
+    return written
+
+
 class InteractionsClient:
     """Minimal client for ``POST /v1beta/interactions``."""
 
@@ -619,12 +663,13 @@ class FilesClient:
 
         Returns the number of bytes written. The destination's directory is
         created if needed.
+
+        The body streams to disk in bounded chunks (P1-2): reading it whole
+        is the measured failure mode of big workspaces (2 GiB rejected;
+        large TARs dying around 122 s), so the response is never buffered
+        in memory. Error semantics match :func:`_send`.
         """
-        raw = _send("GET", self._files_url(environment_id, path,
-                                           media=True, recursive=recursive),
-                    self._api_key, self._timeout)
-        parent = os.path.dirname(os.path.abspath(dest))
-        os.makedirs(parent, exist_ok=True)
-        with open(dest, "wb") as fh:
-            fh.write(raw)
-        return len(raw)
+        return _send_to_file(
+            self._files_url(environment_id, path, media=True,
+                            recursive=recursive),
+            self._api_key, self._timeout, dest)
