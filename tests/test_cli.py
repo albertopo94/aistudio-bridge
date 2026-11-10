@@ -116,6 +116,27 @@ class TestCli(unittest.TestCase):
         self.assertIn("main.py", out)
         self.assertIn("5000", out)
 
+    def test_completed_warns_when_base_branch_moved(self):
+        runner = StubRunner({
+            "task_id": "t_1", "status": "completed", "tokens": 5000,
+            "branch": "worker/abc", "clone_dir": "/tmp/clone",
+            "changed": ["M  main.py"], "base_moved": True,
+        })
+        code, out, _ = invoke(
+            ["run", "a task", "--repo", "https://x/y"], runner
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("base branch moved", out)
+
+    def test_status_reports_base_moved_when_present(self):
+        runner = StubRunner({
+            "task_id": "t_1", "status": "completed",
+            "branch": "worker/abc", "base_moved": True,
+        })
+        code, out, _ = invoke(["status", "t_1"], runner)
+        self.assertEqual(code, 0)
+        self.assertIn("base_moved: True", out)
+
     # Rule 5
     def test_unknown_task_exits_nonzero(self):
         code, _, err = invoke(["status", "missing"], StubRunner())

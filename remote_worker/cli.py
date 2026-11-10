@@ -582,6 +582,14 @@ def _report_run(result: dict) -> int:
     branch = result.get("branch")
     if branch:
         print(f"branch: {branch}")
+    if result.get("base_moved"):
+        # The snapshot's base commit was no longer the branch head when the
+        # delivery landed: the branch advanced while the agent worked. The
+        # delivery is anchored on the snapshot base (P0-1), so nothing of the
+        # agent's work is lost, but the user must reconcile before merging.
+        print("warning: base branch moved while the agent worked; the "
+              "delivery is anchored on the snapshot base commit -- review "
+              "the branch diff before merging.")
     clone_dir = result.get("clone_dir")
     if clone_dir:
         print(f"clone:  {clone_dir}")
@@ -805,7 +813,7 @@ def _report_status(payload) -> int:
             print(f"{task.get('task_id')}  {task.get('status')}")
         return 0
     for key in ("task_id", "status", "model", "branch", "tokens",
-                "interaction_id", "environment_id"):
+                "interaction_id", "environment_id", "base_moved"):
         value = payload.get(key)
         if value is not None:
             print(f"{key}: {value}")

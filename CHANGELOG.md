@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.26.1] — 2026-11-10
+
+### Changed
+
+- The `run`/`continue` report now warns when the base branch moved while
+  the agent worked ("warning: base branch moved ..."), so the fact that
+  the delivery was anchored on the snapshot base commit is visible in the
+  CLI instead of only in the result dict and the task store (P0-1
+  follow-up). `status <task-id>` also prints `base_moved` when set.
+
 ## [0.26.0] — 2026-11-10
 
 ### Added
