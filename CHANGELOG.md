@@ -5,6 +5,119 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.25.5] — 2026-11-10
+
+### Documentation
+
+- The README, the skill text and this changelog now describe what the code
+  actually does after the hardening pass: tests are not run on the host without
+  `--run-tests`, memory is read-only without `--memory-save`, a delivery is one
+  commit that carries deletions, a completed `continue` delivers, and task ids
+  are unique.
+
+## [0.25.4] — 2026-11-10
+
+### Fixed
+
+- `ask --stream` printed the answer twice (the deltas live, then the completed
+  text again). It now prints once, and a streamed answer is not re-printed by
+  the report.
+- `ask --stream --image` silently dropped the images: the streaming branch sent
+  the bare task string while the other branch sent text plus image parts. Both
+  now send the same input.
+
+## [0.25.3] — 2026-11-10
+
+### Fixed
+
+- A task interrupted mid-run is now recoverable. Each function round creates a
+  new interaction and its id was never stored, so a process killed between
+  rounds left the record naming the previous conversation: `status --live` read
+  a stale id and `continue` refused the task it could have resumed. The newest
+  interaction id and `in_progress` are persisted after every round, and
+  `continue` accepts `in_progress` as resumable.
+
+## [0.25.2] — 2026-11-10
+
+### Fixed
+
+- Task ids are unique. They were `t_<epoch seconds>`, so two launches inside one
+  second shared an id and the store merged them: the second task silently took
+  the first one's interaction, environment and branch, and `checkout -B`
+  re-pointed the shared branch. The id now carries a random suffix and the
+  branch is derived from it; a write that would fuse two different tasks is
+  refused instead of overwriting a paid-for record.
+
+## [0.25.1] — 2026-11-10
+
+### Fixed
+
+- A continuation that completes now delivers its code. `run` downloaded the
+  workspace, applied it to a branch and recorded the result; `continue_task`
+  resumed the interaction, wrote the status and returned — so a task that hit
+  its budget, continued and then completed in Google was paid for and never
+  came home. Both paths share one delivery operation, including the
+  `--run-tests` policy and the `undelivered` outcome when the bytes cannot be
+  brought back.
+
+## [0.25.0] — 2026-11-10
+
+### Changed
+
+- **Behaviour change:** `run` no longer executes the delivered project's tests
+  on your machine. The code arrives from a remote agent, and running its tests
+  means running its code with your environment. Pass `--run-tests` to opt in;
+  the report now prints `tests: not run (pass --run-tests …)` instead of
+  nothing, so a clean exit is never mistaken for a green suite.
+
+### Added
+
+- `--run-tests` (for `run` and `continue`). On that path the test child gets a
+  scrubbed environment built by allowlist (PATH, locale, TMPDIR, …) with `HOME`
+  pointed at the scratch copy, so API keys, cloud credentials, the SSH agent
+  and `~/.ssh` are out of reach. `sync.run_tests()` scrubs for every caller.
+
+## [0.24.3] — 2026-11-10
+
+### Changed
+
+- **Behaviour change:** the remote worker no longer writes to your memory. It
+  could call `memory_save` by default and put a sentence it invented — or text
+  lifted from a poisoned repository — into the durable store that steers later
+  sessions. Memory is read-only unless you pass `--memory-save` (on `run`,
+  `ask` or `continue`), and the tool is not even advertised without it.
+
+### Added
+
+- Bounds on an opted-in write: title 200 characters, content 8000, a plain
+  category word; empty, oversized or malformed input is refused and reported to
+  the worker rather than silently stored.
+
+## [0.24.2] — 2026-11-10
+
+### Fixed
+
+- Each delivery is a clean, committed unit. `apply_to_branch` staged onto
+  whatever the previous task left in the persistent clone and never committed,
+  so a new task's diff reported the previous task's work.
+- A file the remote agent deleted now reaches the branch: the overlay only ever
+  copied, so deletions silently never landed. Removals are applied before the
+  overlay, against tracked files only, so your own untracked files in the clone
+  survive and stay out of the delivery commit.
+
+## [0.24.1] — 2026-11-10
+
+### Security
+
+- Workspace extraction is fail-closed on every supported Python. The fallback
+  `extractall(dest)` with no filter ran precisely on unpatched 3.10/3.11 — the
+  versions the declared `>=3.10` floor still supports, where no tarfile path
+  traversal fix exists. Every header is now validated before a byte is written:
+  absolute and escaping paths, symlink/hardlink/device members and a 4 GiB
+  declared total abort the delivery (`undelivered`, sandbox kept), and an older
+  interpreter extracts pre-validated regular members through a size-capped loop
+  instead of an unfiltered extract.
+
 ## [0.24.0] — 2026-11-07
 
 ### Added

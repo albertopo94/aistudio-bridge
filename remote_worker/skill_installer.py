@@ -89,7 +89,9 @@ Two modes:
 
 - `remote-worker run "<task>" --repo <repo-url>` for CODE tasks: the worker
   edits a clone of the repo and returns a diff on a branch. The user reviews
-  and merges; you never apply the diff.
+  and merges; you never apply the diff. Its tests are NOT run on the user's
+  machine unless they pass `--run-tests` (that code is remote-written), and the
+  worker cannot write to memory unless they pass `--memory-save`.
 - `remote-worker ask "<task>"` for NON-code tasks (research, analysis,
   generation): returns the worker's text directly.
 

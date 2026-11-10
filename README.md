@@ -69,16 +69,21 @@ on the task and the moment you run it. This block shows the shape of a
 completed run (here, against this very repository).
 
 ```
-task:   t_1793818082
+task:   t_1793818082_a1b2c3d4
 status: completed
 tokens: 107105 of 200000
-branch: worker/aistudio-bridge-1793818082
+branch: worker/aistudio-bridge-t_1793818082_a1b2c3d4
 clone:  ~/.remote-worker/aistudio-bridge/work/clone
   M  README.md
   M  remote_worker/planner.py
-tests:  pass
+tests:  not run (pass --run-tests to execute them locally)
 nothing was pushed; merge the branch when you are ready.
 ```
+
+The delivery is a commit on that branch, so `git show worker/...` reads as one
+reviewable change, and a file the agent deleted is deleted here too. Tests are
+not executed unless you ask: the code arrived from a remote agent, and running
+its tests means running its code on your machine.
 
 Then review and merge with your own git:
 
@@ -133,13 +138,15 @@ merges the result itself — review the branch, then merge it with your own git.
 | `run "<task>" --repo <url> --mount-file <local>:<target>` | Place a local text file inside the sandbox (repeatable) — skills, extra norms |
 | `run "<task>" --repo <url> --delete-env` | Delete the sandbox once the delivery is verified (`--local-repo` works too; a failed delivery always keeps it) |
 | `run "<task>" --repo <url> --image shot.png` | Send an image with the task: "look at this screenshot" (repeatable) |
+| `run "<task>" --repo <url> --run-tests` | Run the delivered project's tests on your machine. Off by default: that code was written by a remote agent, and running it is executing it |
+| `run "<task>" --repo <url> --memory-save` | Let the worker write durable findings into Engram memory. Off by default: memory is read-only unless you say so |
 | `ask "<task>"` | Delegate a NON-code task, get the text back (no repo mounted) |
-| `ask "<task>" --stream` | Same, but print the worker's text live as it is generated |
+| `ask "<task>" --stream` | Same, but print the worker's text live as it is generated (printed once, not repeated at the end) |
 | `ask "<task>" --background` | Same, but poll instead of holding one connection open (cannot combine with `--stream`) |
 | `ask "<task>" --image shot.png` | Same, with an image attached (repeatable) |
 | `status [task_id]` | List tasks, or show one (works offline, no key needed) |
 | `status <task_id> --live` | Also ask the service for the task's current status (needs a key) |
-| `continue <task_id>` | Resume a task that reached its budget |
+| `continue <task_id>` | Resume a task that reached its budget, or one interrupted mid-run; if it completes, the delivery runs like any other |
 | `cancel <task_id>` | Stop tracking a task locally, and ask the service to stop it too |
 | `clean` | List the sandboxes your account still holds (deletes nothing) |
 | `clean --yes` | Delete the ones no unfinished task is using |
@@ -431,13 +438,17 @@ the sandbox pushing the result to your git host
     status: refused by design
 ```
 
-`run` takes the first row for you: every completed run downloads the workspace,
-applies it to a fresh clone on a new branch and runs your tests before you look
-at it. That download has its own outcome: if it fails (a workspace above the
+`run` takes the first row for you: every completed run downloads the workspace
+and applies it to a fresh clone on a new branch, as one commit, before you look
+at it. Its tests are not run unless you pass `--run-tests`, because running
+them is running remote-written code on your machine; when you do pass it, the
+test process gets a scrubbed environment (no API keys, no SSH agent, a scratch
+`HOME`). That download has its own outcome: if it fails (a workspace above the
 tar's ~1 GiB ceiling answers 500/504), the task records `undelivered` — not
 `completed` — says the service's error, prints the `fetch` commands that reach
 the bytes file by file, and keeps the sandbox out of `clean --yes` until the
-work is back. `fetch` is for the other two questions — *what did it produce?* and *just
+work is back. `continue` delivers the same way when the continuation completes.
+`fetch` is for the other two questions — *what did it produce?* and *just
 give me that file* — which would otherwise cost the whole archive to answer:
 
 ```bash
@@ -586,9 +597,18 @@ one reason it is not the engine behind `ask`.
   is discarded, and admin operations (delete, prune, merge) are unreachable.
 - The request trace (`REMOTE_WORKER_TRACE`) is written only when you ask for
   it, and masks credential-shaped fields before writing.
-- The worker may call `memory_search`, `memory_save` and `memory_context`.
-  Nothing that writes to your filesystem beyond the repository, and nothing
-  that deletes memory.
+- The worker reads your memory (`memory_search`, `memory_context`) and cannot
+  write it unless you pass `--memory-save`; even then a write is bounded (title
+  200 characters, content 8000, a plain category word) and empty or oversized
+  input is refused. Nothing else reaches your filesystem beyond the repository,
+  and nothing deletes memory.
+- The delivered tree is never executed on your machine unless you pass
+  `--run-tests`. When you do, the test child gets an allowlisted environment
+  (PATH, locale, TMPDIR) with `HOME` pointed at the scratch copy, so API keys,
+  cloud credentials and the SSH agent are not inherited.
+- Task ids carry a random suffix, so two launches in the same second stay two
+  tasks; a write that would fuse two different tasks is refused instead of
+  overwriting a paid-for record.
 
 ### What Google keeps server-side
 
