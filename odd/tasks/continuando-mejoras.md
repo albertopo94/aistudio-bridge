@@ -83,7 +83,7 @@ historial de cambios sincronizado con las versiones publicadas.
 
 | ID | Spec | Ruta | Commit |
 |----|------|------|--------|
-| T1 | P0-1 | snapshot identity (base_commit/base_sha) + apply contra ese punto | — |
+| T1 | P0-1 | snapshot identity (base_commit/base_sha) + apply contra ese punto | 49e7891 |
 | T2 | P0-3 | corregir afirmación/protección de `--run-tests` (docs + mensaje) | — |
 | T3 | DOC-1 | sincronizar CHANGELOG hasta v0.25.7 | — |
 | T4 | P1-1 | completar o desactivar la ruta GCS | — |
@@ -97,3 +97,10 @@ historial de cambios sincronizado con las versiones publicadas.
 L1 (2026-11-10): el usuario preguntó "en que nos quedamos ? que tocaba hacer en
 esta sesion?", y aceptó ("si") arrancar por P0-1 con feature doc ODD. Backlog
 original en `continuando con mejoras.md` (revisión post-hardening v0.25.7).
+
+L2 (2026-11-10): T1 cerrado en 49e7891 (feat(sync)). Suite 316 OK. El feature doc
+va en 1595d08 (docs). T1 implementa: `archive_repo` devuelve `base_commit`; `run`
+y `continue_task` lo registran (local-repo = HEAD empaquetado, repo remoto =
+`_remote_head`); `apply_to_branch` acepta `base_commit`, ancla la entrega en ese
+punto y reporta `base_moved` cuando la rama avanzó. Falta por decidir en P0-1:
+reportar `base_moved` en el CLI/status (hoy solo queda en el resultado y el store).
