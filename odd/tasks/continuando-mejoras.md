@@ -84,9 +84,9 @@ historial de cambios sincronizado con las versiones publicadas.
 | ID | Spec | Ruta | Commit |
 |----|------|------|--------|
 | T1 | P0-1 | snapshot identity (base_commit/base_sha) + apply contra ese punto | 49e7891 |
-| T2 | P0-3 | corregir afirmación/protección de `--run-tests` (docs + mensaje) | — |
-| T3 | DOC-1 | sincronizar CHANGELOG hasta v0.25.7 | — |
-| T4 | P1-1 | completar o desactivar la ruta GCS | — |
+| T2 | P0-3 | corregir afirmación/protección de `--run-tests` (docs + mensaje) | 4aa6bb1 |
+| T3 | DOC-1 | sincronizar CHANGELOG hasta v0.25.7 | c16fc85 |
+| T4 | P1-1 | completar o desactivar la ruta GCS | 9c895ca |
 | T5 | P0-2 | aislar tareas concurrentes | — |
 | T6 | P1-2 | retorno incremental de workspaces grandes | — |
 | T7 | D-1 | idempotencia de llamadas a funciones | — |
@@ -104,3 +104,10 @@ y `continue_task` lo registran (local-repo = HEAD empaquetado, repo remoto =
 `_remote_head`); `apply_to_branch` acepta `base_commit`, ancla la entrega en ese
 punto y reporta `base_moved` cuando la rama avanzó. Falta por decidir en P0-1:
 reportar `base_moved` en el CLI/status (hoy solo queda en el resultado y el store).
+
+L3 (2026-11-10): T2 cerrado en 4aa6bb1 (docs(run-tests)), T3 en c16fc85
+(docs(changelog)), T4 en 9c895ca (feat(gcs)). Suite 309 OK. T2 corrige la
+afirmación de `--run-tests` (el entorno reducido NO es un sandbox: corre con el
+mismo usuario y con red). T3 agrega 0.25.6 y 0.25.7 al CHANGELOG. T4 desactiva
+`--gcs-source` (rechaza en lanzamiento; la tabla de rutas lo marca
+`STATUS_DISABLED`) hasta que tenga retorno git.
