@@ -27,7 +27,8 @@ from .planner import (agent_config, network_config, task_parts,
                       worker_contract)
 from .routes import (human_duration, human_rate, is_size_limit,
                      upload_failure_message)
-from .state import DEFAULT_ROOT, TaskStore, _slug, list_project_stores
+from .state import (DEFAULT_ROOT, TaskStore, _slug, list_project_stores,
+                    new_task_id)
 from .sync import (GitError, apply_to_branch, archive_repo, inline_source,
                    mount_gcs, mount_repo, run_tests, INLINE_TOTAL_LIMIT_BYTES)
 
@@ -423,8 +424,8 @@ class TaskRunner:
                 network = {"allowlist": [gcs_rule, {"domain": "*"}]}
             else:
                 network["allowlist"].append(gcs_rule)
-        task_id = f"t_{int(time.time())}"
-        branch = branch or f"worker/{repo_name}-{int(time.time())}"
+        task_id = new_task_id()
+        branch = branch or f"worker/{repo_name}-{task_id}"
 
         tools = [{"type": "code_execution"}]
         if self.memory_enabled:
@@ -476,7 +477,7 @@ class TaskRunner:
             tools=tools,
             background=background,
         )
-        self.store.record({
+        self.store.record(create=True, task={
             "task_id": task_id,
             "kind": "run",
             "status": interaction.get("status"),
@@ -1043,7 +1044,7 @@ class TaskRunner:
         proj = project or self.project
         if self.memory_enabled:
             self.dispatcher.allow_save = memory_save
-        task_id = f"t_{int(time.time())}"
+        task_id = new_task_id()
 
         tools = [{"type": "code_execution"}, {"type": "google_search"},
                  {"type": "url_context"}]
@@ -1074,7 +1075,7 @@ class TaskRunner:
                 tools=tools,
                 background=background,
             )
-        self.store.record({
+        self.store.record(create=True, task={
             "task_id": task_id, "kind": "ask",
             "status": interaction.get("status"),
             "interaction_id": interaction.get("id"),

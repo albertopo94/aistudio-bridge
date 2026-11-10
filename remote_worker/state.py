@@ -11,8 +11,19 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+import uuid
 
 DEFAULT_ROOT = os.path.join(os.path.expanduser("~"), ".remote-worker")
+
+
+def new_task_id() -> str:
+    """A task id that is unique even for two launches in the same second.
+
+    The second stays in the name because it is what a human sorts and
+    recognizes; the random suffix is what makes it unique (hardening S5).
+    """
+    return f"t_{int(time.time())}_{uuid.uuid4().hex[:8]}"
 
 
 def _slug(project: str) -> str:
@@ -78,13 +89,30 @@ class TaskStore:
 
     # --- writing ---------------------------------------------------------
 
-    def record(self, task: dict) -> dict:
-        """Insert or merge one task record, keyed by ``task_id``."""
+    def record(self, task: dict, *, create: bool = False) -> dict:
+        """Insert or merge one task record, keyed by ``task_id``.
+
+        Merging is how a task's own status updates accumulate, including a
+        continuation that legitimately moves its interaction id forward. It
+        must never fuse two DIFFERENT tasks, so a caller that is CREATING a
+        task passes ``create=True``: an id already owned by another
+        interaction then refuses instead of overwriting a paid-for record
+        (hardening S5).
+        """
         task_id = task.get("task_id")
         if not task_id:
             raise ValueError("task_id is required")
         data = self._load()
         existing = data["tasks"].get(task_id, {})
+        incoming = task.get("interaction_id")
+        owned = existing.get("interaction_id")
+        if create and owned and incoming and incoming != owned:
+            # Two different tasks share an id; report the collision instead
+            # of destroying a paid-for record.
+            raise ValueError(
+                f"task_id {task_id!r} already names another task "
+                f"(interaction {owned!r}, not {incoming!r})"
+            )
         existing.update(task)
         data["tasks"][task_id] = existing
         self._save(data)
