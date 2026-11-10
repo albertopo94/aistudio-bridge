@@ -422,3 +422,104 @@ class UnsafeTarMemberTest(unittest.TestCase):
     def test_clean_tar_still_applies(self):
         result = self._apply(make_worker_tar(self.tmp))
         self.assertIn("multiply", result["diff"])
+
+
+class DeliveryFreshnessTest(unittest.TestCase):
+    """Hardening S4 + S9: every delivery is a clean, committed unit.
+
+    The old apply staged onto whatever the previous task left in the
+    persistent clone and never committed, so task N+1's diff --cached
+    reported task N's work (and remote deletions never reached the branch
+    at all). A delivery now: starts from the remote's main line, removes
+    tracked files the workspace no longer holds, stages, and commits.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = self._tmp.name
+        self.origin = make_origin(self.tmp)
+        with open(os.path.join(self.origin, "extra.py"), "w") as fh:
+            fh.write("SECRET = True\n")
+        git(self.origin, "add", "extra.py")
+        git(self.origin, "commit", "-qm", "add extra")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _tar(self, files, name="ws.tar"):
+        path = os.path.join(self.tmp, name)
+        with tarfile.open(path, "w"):
+            pass
+        for rel, data in files.items():
+            add_member(path, f"worker-repo/{rel}", data=data)
+        return path
+
+    def _apply(self, files, branch, name="ws.tar"):
+        return apply_to_branch(
+            tar_path=self._tar(files, name), repo_url=self.origin,
+            branch=branch, workdir=os.path.join(self.tmp, "clone"),
+            repo_dir="worker-repo",
+        )
+
+    MAIN = "def add(a, b):\n    return a + b\n"
+
+    def test_deletion_reaches_the_local_branch(self):
+        result = self._apply({"main.py": self.MAIN}, "worker/r1")
+        self.assertFalse(
+            os.path.exists(os.path.join(result["clone_dir"], "extra.py")),
+            "a file the workspace deleted is still in the clone",
+        )
+        self.assertIn("-SECRET = True", result["diff"])
+        self.assertTrue(
+            any("extra.py" in line and line.strip().startswith("D")
+                for line in result["changed"]),
+            f"no deletion in changed: {result['changed']}",
+        )
+
+    def test_delivery_is_committed_and_index_clean(self):
+        result = self._apply(
+            {"main.py": self.MAIN + "\nEXTRA = 1\n", "extra.py":
+             "SECRET = True\n"}, "worker/r1",
+        )
+        clone = result["clone_dir"]
+        self.assertEqual(git(clone, "status", "--short").stdout, "")
+        log = git(clone, "log", "--oneline")
+        self.assertEqual(len(log.stdout.splitlines()), 3, log.stdout)
+        self.assertIn("worker/r1", log.stdout)
+
+    def test_second_delivery_never_stacks_on_the_first(self):
+        self._apply({"main.py": self.MAIN}, "worker/r1")
+        result2 = self._apply({"main.py": self.MAIN + "\n\ndef sub(a, b):\n"
+                               "    return a - b\n", "extra.py":
+                               "SECRET = True\n"}, "worker/r2",
+                              name="ws2.tar")
+        clone = result2["clone_dir"]
+        self.assertNotIn("SECRET", result2["diff"])
+        self.assertFalse(
+            any("extra.py" in line for line in result2["changed"]),
+            f"task 1's deletion leaked into task 2: {result2['changed']}",
+        )
+        count = git(clone, "rev-list", "--count", "worker/r2")
+        self.assertEqual(count.stdout.strip(), "3")
+        count1 = git(clone, "rev-list", "--count", "worker/r1")
+        self.assertEqual(count1.stdout.strip(), "3")
+
+    def test_local_untracked_file_survives_next_delivery(self):
+        first = self._apply({"main.py": self.MAIN}, "worker/r1")
+        notes = os.path.join(first["clone_dir"], "notes.txt")
+        with open(notes, "w") as fh:
+            fh.write("mine\n")
+        result2 = self._apply({"main.py": self.MAIN, "extra.py":
+                               "SECRET = True\n"}, "worker/r2",
+                              name="ws2.tar")
+        self.assertTrue(os.path.exists(notes))
+        self.assertFalse(
+            any("notes.txt" in line for line in result2["changed"])
+        )
+
+    def test_identical_delivery_makes_no_empty_commit(self):
+        self._apply({"main.py": self.MAIN, "extra.py": "SECRET = True\n"},
+                    "worker/r1")
+        clone = os.path.join(self.tmp, "clone")
+        count = git(clone, "rev-list", "--count", "worker/r1")
+        self.assertEqual(count.stdout.strip(), "2")

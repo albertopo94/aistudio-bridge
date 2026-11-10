@@ -212,21 +212,40 @@ def mount_repo(source_url: str, target: str,
     return {"type": "repository", "source": source_url, "target": target}
 
 
+def _delivery_pathspecs(clone: str, source_root: str) -> list[str]:
+    """Top-level paths this delivery owns (additions, edits, deletions).
+
+    Staging by pathspec keeps the user's own untracked files in the clone
+    out of the delivery commit: only workspace entries and paths tracked
+    at the base can land there.
+    """
+    names = {
+        name for name in os.listdir(source_root)
+        if name not in EXCLUDED_DIRS
+    }
+    for rel in _git(clone, "ls-files").stdout.splitlines():
+        names.add(rel.split("/")[0])
+    return sorted(names)
+
+
 def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
                     workdir: str, repo_dir: str | None = None) -> dict:
     """Apply a downloaded workspace tar onto a fresh clone, on a new branch.
 
-    "Fresh" is load-bearing: the clone path is per project and outlives a
-    task, so a clone of ANOTHER repository left there by an earlier run
-    must never absorb this delivery -- the branch would land on unrelated
-    history while the real repository never receives it (T25's live run
-    found exactly that, odd L45). A mismatched clone is kept under a dated
-    name (it may hold a branch nobody merged yet) and the right one is
-    cloned in its place.
+    "Fresh" is load-bearing twice. Across repositories: the clone path is
+    per project and outlives a task, so a clone of ANOTHER repository left
+    there by an earlier run must never absorb this delivery -- the branch
+    would land on unrelated history while the real repository never
+    receives it (T25's live run found exactly that, odd L45); a mismatched
+    clone is kept under a dated name (it may hold a branch nobody merged
+    yet) and the right one is cloned in its place. Across tasks of the SAME
+    repository (hardening S9): the branch is reset to the remote's main
+    line and the delivery is committed, so the next task's diff --cached
+    can only ever hold its own work.
 
     Returns ``{"clone_dir", "diff", "changed"}``. ``changed`` lists the
-    ``git status --short`` lines so the caller can report what moved without
-    re-running git.
+    ``git status --short`` lines taken before the commit so the caller can
+    report what moved; the index is clean afterwards.
     """
     clone = os.path.abspath(workdir)
     if not _clone_of(clone, repo_url):
@@ -234,21 +253,67 @@ def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
             stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S-%f")
             os.replace(clone, f"{clone}.bak-{stamp}")
         _git(None, "clone", "-q", repo_url, clone)
-    _git(clone, "checkout", "-q", "-B", branch)
+    try:
+        _git(clone, "fetch", "-q", "origin")
+    except GitError:
+        pass  # offline: the cached remote refs still bound the main line
+    base = _remote_base(clone)
+    _git(clone, "checkout", "-q", "-B", branch, *([base] if base else []))
 
     with tempfile.TemporaryDirectory(prefix="worker-tar-") as scratch:
         _extract(tar_path, scratch)
         source_root = _repo_root(scratch, repo_dir)
         _purge_artifacts(source_root)
+        _drop_removed(clone, source_root)
         _overlay(source_root, clone)
+        pathspecs = _delivery_pathspecs(clone, source_root)
 
-    _git(clone, "add", "-A")
+    if pathspecs:
+        _git(clone, "add", "-A", "--", *pathspecs)
     diff = _git(clone, "diff", "--cached").stdout
     changed = [
         line for line in _git(clone, "status", "--short").stdout.splitlines()
-        if line.strip()
+        # "??" is the user's own untracked residue in the clone; staging by
+        # pathspec kept it out of the delivery, reporting it would lie.
+        if line.strip() and not line.startswith("??")
     ]
+    if changed:
+        _git(clone, "commit", "-q", "-m",
+             f"remote-worker delivery on {branch}")
     return {"clone_dir": clone, "diff": diff, "changed": changed}
+
+
+def _remote_base(clone: str) -> str | None:
+    """The remote's main line as a local ref, or None if none resolves."""
+    for ref in ("origin/HEAD", "origin/main", "origin/master"):
+        proc = subprocess.run(
+            ["git", "-C", clone, "rev-parse", "--verify", "--quiet", ref],
+            capture_output=True, text=True,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return ref
+    return None
+
+
+def _drop_removed(clone: str, source_root: str) -> None:
+    """Delete tracked files the delivered workspace no longer holds (S4).
+
+    The overlay only ever adds; without this, an agent that deletes a file
+    delivers a branch that silently keeps it. The removal runs before the
+    overlay against the files tracked at the checked-out base, and only
+    candidates tracked there are touched -- so the user's own untracked
+    files in the clone survive the delivery.
+    """
+    for rel in _git(clone, "ls-files").stdout.splitlines():
+        if rel.split("/")[0] in EXCLUDED_DIRS:
+            continue
+        if os.path.lexists(os.path.join(source_root, rel)):
+            continue
+        target = os.path.join(clone, rel)
+        if os.path.islink(target) or os.path.isfile(target):
+            os.remove(target)
+        elif os.path.isdir(target):
+            shutil.rmtree(target)
 
 
 def run_tests(workdir: str, command: list[str],

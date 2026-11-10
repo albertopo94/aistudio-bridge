@@ -65,14 +65,31 @@ def _make_origin(tmp):
 
 
 def _worker_tar_bytes():
-    """A workspace tar whose top-level dir matches the repo name `origin`."""
+    """A workspace tar shaped like a sandbox that cloned this repo.
+
+    The service clones the repository itself, so the workspace carries the
+    whole tree the origin holds -- including its tests. That matters since
+    hardening S4: a delivery removes tracked files the workspace no longer
+    holds, so a tar missing `tests/` would legitimately delete them.
+    """
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tar:
-        payload = b"def add(a, b):\n    return a + b\n\n\ndef mul(a, b):\n    return a * b\n"
-        info = tarfile.TarInfo("origin/main.py")
-        info.size = len(payload)
-        info.mode = 0o644
-        tar.addfile(info, io.BytesIO(payload))
+        def add(name, payload, mode=0o644):
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            info.mode = mode
+            tar.addfile(info, io.BytesIO(payload))
+
+        add("origin/main.py",
+            b"def add(a, b):\n    return a + b\n\n\ndef mul(a, b):\n"
+            b"    return a * b\n")
+        add("origin/tests/test_main.py",
+            b"import sys, os\n"
+            b"sys.path.insert(0, os.path.dirname(os.path.dirname(\n"
+            b"    os.path.abspath(__file__))))\n"
+            b"import main\n\n\n"
+            b"def test_add():\n"
+            b"    assert main.add(1, 2) == 3\n")
     return buf.getvalue()
 
 
@@ -213,10 +230,15 @@ class DeliveryFailureTest(unittest.TestCase):
                          "completed")
         self.assertTrue(os.path.isdir(os.path.join(
             self.tmp, "clone", ".git")), "no clone was made")
+        # S9: the delivery is a commit on its branch, so the index is clean
+        # and the work is visible in history rather than staged forever.
         shown = subprocess.run(
-            ["git", "-C", os.path.join(self.tmp, "clone"), "status",
-             "--short"], capture_output=True, text=True)
+            ["git", "-C", os.path.join(self.tmp, "clone"), "show",
+             "--stat", "--oneline", "HEAD"], capture_output=True, text=True)
         self.assertIn("main.py", shown.stdout)
+        self.assertEqual(subprocess.run(
+            ["git", "-C", os.path.join(self.tmp, "clone"), "status",
+             "--short"], capture_output=True, text=True).stdout, "")
         # The workspace tar is transient: it does not accumulate per task.
         leftovers = [f for f in os.listdir(self.tmp)
                      if f.endswith(".tar")]
