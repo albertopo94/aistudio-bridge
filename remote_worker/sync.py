@@ -38,6 +38,21 @@ REPOSITORY_SOURCE_LIMIT_BYTES = 500 * 1024 * 1024
 INLINE_FILE_LIMIT_BYTES = 1 * 1024 * 1024
 INLINE_TOTAL_LIMIT_BYTES = 2 * 1024 * 1024
 
+#: Ceiling for the total declared size of an extracted workspace tar. The
+#: biggest workspace ever delivered here was 3.6 GiB (odd L39); 4 GiB bounds a
+#: hostile archive that claims member sizes to fill the disk.
+EXTRACT_TOTAL_LIMIT_BYTES = 4 * 1024 * 1024 * 1024
+
+
+class UnsafeTarMemberError(tarfile.TarError):
+    """A workspace member that must never touch the disk (hardening S2).
+
+    The delivery unpacks a tree an agent built inside a sandbox the prompt
+    may have contaminated. This error is a ``tarfile.TarError``, so the
+    run path already maps it to ``undelivered`` — the branch is never
+    half-written, and the sandbox stays the only copy for recovery.
+    """
+
 
 def tar_gz_bytes(files: dict) -> bytes:
     """Pack ``{path: bytes}`` into a gzip tarball, in memory.
@@ -294,12 +309,89 @@ def _git(cwd: str | None, *args: str) -> subprocess.CompletedProcess:
     return proc
 
 
+def _safe_member_path(dest: str, name: str) -> str:
+    """Resolve one tar member inside ``dest`` or refuse it (hardening S2).
+
+    Rejects absolute paths (POSIX, Windows drive, UNC) and any ``..``
+    component, then re-checks the resolved path against the destination
+    after normalization -- so ``a/../../x`` is refused even when its first
+    segment looked harmless.
+    """
+    flat = name.replace("\\", "/")
+    if flat.startswith("/") or (len(name) >= 2 and name[1] == ":"):
+        raise UnsafeTarMemberError(f"absolute member path: {name!r}")
+    if ".." in flat.split("/"):
+        raise UnsafeTarMemberError(f"member escapes the destination: {name!r}")
+    target = os.path.normpath(os.path.join(dest, *flat.split("/")))
+    root = os.path.normpath(dest)
+    if target != root and not target.startswith(root + os.sep):
+        raise UnsafeTarMemberError(f"member escapes the destination: {name!r}")
+    return target
+
+
+def _extract_manual(tar: tarfile.TarFile, dest: str, members: list) -> None:
+    """Extract pre-validated regular members on a Python without ``filter``.
+
+    Hardening S2 forbade the historical fallback (``extractall(dest)`` with
+    no filter) that silently dropped every protection on Python older than
+    the Sept-2023 patches. Every member here already passed :func:
+   :`_safe_member_path`, the size cap, and the file/dir type check, and each
+    stream is capped at its declared size, so this path stays fail-closed.
+    """
+    for member in members:
+        target = _safe_member_path(dest, member.name)
+        if member.isdir():
+            os.makedirs(target, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(target) or dest, exist_ok=True)
+        source = tar.extractfile(member)
+        if source is None:  # only for link-like members, refused above
+            raise UnsafeTarMemberError(f"unreadable member: {member.name!r}")
+        remaining = member.size
+        with source, open(target, "wb") as out:
+            while remaining > 0:
+                chunk = source.read(min(remaining, 1024 * 1024))
+                if not chunk:
+                    raise UnsafeTarMemberError(
+                        f"member is shorter than its declared size: "
+                        f"{member.name!r}"
+                    )
+                out.write(chunk)
+                remaining -= len(chunk)
+        os.chmod(target, 0o644)
+
+
 def _extract(tar_path: str, dest: str) -> None:
+    """Unpack a workspace tar into ``dest``, refusing unsafe members (S2).
+
+    Validation runs over every header BEFORE a single byte is written: a
+    hostile archive aborts the delivery instead of leaving a partial tree.
+    The `data` filter (Python >= 3.12, backported to the Sept-2023 patch
+    releases) stays as a second net on modern interpreters; on an older
+    one the declared floor (3.10) the pre-validation plus the capped
+    manual extraction above replace it -- never an unfiltered extractall.
+    """
     with tarfile.open(tar_path) as tar:
+        members = tar.getmembers()
+        total = 0
+        for member in members:
+            if not (member.isfile() or member.isdir()):
+                raise UnsafeTarMemberError(
+                    f"{member.type.decode(errors='replace')!r} member is not "
+                    f"allowed in a workspace: {member.name!r}"
+                )
+            total += member.size
+            if total > EXTRACT_TOTAL_LIMIT_BYTES:
+                raise UnsafeTarMemberError(
+                    f"workspace declares more than "
+                    f"{EXTRACT_TOTAL_LIMIT_BYTES // (1024 * 1024)} MB "
+                    f"(at member {member.name!r})"
+                )
+            _safe_member_path(dest, member.name)
         try:
             tar.extractall(dest, filter="data")
-        except TypeError:  # Python < 3.12 has no filter argument
-            tar.extractall(dest)
+        except TypeError:  # Python without the filter argument (< 3.12)
+            _extract_manual(tar, dest, members)
 
 
 def _repo_root(scratch: str, repo_dir: str | None) -> str:

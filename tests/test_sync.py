@@ -9,6 +9,10 @@ Rules under test:
    ``git add``.
 3. A source file with mode 000 inside the tar does not abort the apply.
 4. ``run_tests`` reports the project's own test result faithfully.
+5. (hardening S2) Extraction is fail-closed: a member that escapes the
+   destination (``../``, absolute), arrives as a symlink/hardlink/device,
+   or overshoots its declared size aborts the delivery. There is no
+   unfiltered ``extractall`` fallback on any supported Python.
 """
 
 import io
@@ -42,6 +46,19 @@ def make_origin(tmp):
     git(origin, "add", "main.py")
     git(origin, "commit", "-qm", "initial")
     return origin
+
+
+def add_member(path, name, *, data="", mode=0o644, typ=tarfile.REGTYPE,
+               linkname="", declared_size=None):
+    """Append one member to the tar at ``path``, with full control."""
+    with tarfile.open(path, "a") as tar:
+        info = tarfile.TarInfo(name)
+        payload = data.encode()
+        info.size = len(payload) if declared_size is None else declared_size
+        info.mode = mode
+        info.type = typ
+        info.linkname = linkname
+        tar.addfile(info, io.BytesIO(payload))
 
 
 def make_worker_tar(tmp, *, pycache_mode=0o000):
@@ -289,3 +306,119 @@ class TestRunTestsDoesNotPolluteDiff(unittest.TestCase):
                 os.path.exists(os.path.join(tmp, "__pycache__")),
                 "run_tests created a __pycache__ in the clone",
             )
+
+
+class UnsafeTarMemberTest(unittest.TestCase):
+    """Hardening S2: extraction is fail-closed on every supported Python.
+
+    The delivery applies a tar built inside a sandbox a prompted agent
+    controlled. A member that escapes the destination (``../``, absolute
+    path), arrives as a symlink/hardlink/device, or pushes the tree past
+    the declared cap aborts the WHOLE delivery — never a silent skip,
+    never the pre-3.12 unfiltered fallback (odd/tasks/hardening.md S2).
+    """
+
+    def setUp(self):
+        if apply_to_branch is None:
+            self.fail("RED: remote_worker.sync not implemented yet")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = self._tmp.name
+        self.origin = make_origin(self.tmp)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _tar(self, name="workspace.tar"):
+        """A tar with one clean member; tests append the hostile one."""
+        path = os.path.join(self.tmp, name)
+        with tarfile.open(path, "w"):
+            pass
+        add_member(path, "worker-repo/main.py",
+                   data="def add(a, b):\n    return a + b\n")
+        return path
+
+    def _apply(self, tar):
+        return apply_to_branch(
+            tar_path=tar, repo_url=self.origin, branch="worker/test",
+            workdir=os.path.join(self.tmp, "clone"),
+        )
+
+    def test_traversal_member_rejected(self):
+        from remote_worker.sync import UnsafeTarMemberError
+        tar = self._tar()
+        add_member(tar, "worker-repo/../../evil.txt", data="pwned")
+        with self.assertRaises(UnsafeTarMemberError):
+            self._apply(tar)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "evil.txt")))
+
+    def test_absolute_member_rejected(self):
+        from remote_worker.sync import UnsafeTarMemberError
+        tar = self._tar()
+        add_member(tar, "/etc/evil.conf", data="pwned")
+        with self.assertRaises(UnsafeTarMemberError):
+            self._apply(tar)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "etc")))
+
+    def test_symlink_member_rejected(self):
+        from remote_worker.sync import UnsafeTarMemberError
+        tar = self._tar()
+        add_member(tar, "worker-repo/escape",
+                   typ=tarfile.SYMTYPE, linkname="/etc/passwd")
+        with self.assertRaises(UnsafeTarMemberError):
+            self._apply(tar)
+        self.assertFalse(
+            os.path.lexists(os.path.join(self.tmp, "clone", "escape"))
+        )
+
+    def test_hardlink_member_rejected(self):
+        from remote_worker.sync import UnsafeTarMemberError
+        tar = self._tar()
+        add_member(tar, "worker-repo/hardlink",
+                   typ=tarfile.LNKTYPE, linkname="/etc/passwd")
+        with self.assertRaises(UnsafeTarMemberError):
+            self._apply(tar)
+
+    def test_fifo_member_rejected(self):
+        from remote_worker.sync import UnsafeTarMemberError
+        tar = self._tar()
+        add_member(tar, "worker-repo/pipe", typ=tarfile.FIFOTYPE)
+        with self.assertRaises(UnsafeTarMemberError):
+            self._apply(tar)
+
+    def test_total_declared_size_cap_rejects(self):
+        from unittest import mock
+        from remote_worker import sync
+        from remote_worker.sync import UnsafeTarMemberError
+        tar = self._tar()
+        with mock.patch.object(sync, "EXTRACT_TOTAL_LIMIT_BYTES", 10):
+            with self.assertRaises(UnsafeTarMemberError):
+                self._apply(tar)
+
+    def test_python_without_filter_still_rejects(self):
+        """The claim's core: no unfiltered fallback on Python < 3.12.
+
+        Simulate the old interpreter by making extractall reject the
+        ``filter`` argument exactly like an unpatched 3.10/3.11 does.
+        The delivery must still refuse the hostile member — the TypeError
+        branch must never fall through to a plain ``extractall(dest)``.
+        """
+        from unittest import mock
+        from remote_worker.sync import UnsafeTarMemberError
+        tar = self._tar()
+        add_member(tar, "worker-repo/../../evil.txt", data="pwned")
+        real_extractall = tarfile.TarFile.extractall
+
+        def old_python(self, *args, **kwargs):
+            if "filter" in kwargs:
+                raise TypeError("extractall() got an unexpected keyword "
+                                "argument 'filter'")
+            return real_extractall(self, *args, **kwargs)
+
+        with mock.patch.object(tarfile.TarFile, "extractall", old_python):
+            with self.assertRaises(UnsafeTarMemberError):
+                self._apply(tar)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "evil.txt")))
+
+    def test_clean_tar_still_applies(self):
+        result = self._apply(make_worker_tar(self.tmp))
+        self.assertIn("multiply", result["diff"])
