@@ -58,6 +58,7 @@ def pending_calls(interaction: dict) -> list[dict]:
 def run_until_complete(client, dispatcher, interaction: dict, *,
                        max_steps: int = MAX_STEPS_DEFAULT,
                        on_event=None,
+                       on_round=None,
                        system_instruction=None,
                        tools=None) -> dict:
     """Answer local function calls until the interaction stops asking.
@@ -73,6 +74,11 @@ def run_until_complete(client, dispatcher, interaction: dict, *,
     continuation must re-send them or the resumed turn runs without the
     contract and without the memory tools (G15). When omitted they are not
     sent, preserving the previous behaviour for callers that pass neither.
+
+    ``on_round`` receives the interaction created by each round, so a caller
+    can persist its id before the next round starts. A process killed between
+    rounds then leaves a record naming the live conversation instead of a
+    stale one (hardening S7).
     """
     steps_taken = 0
 
@@ -108,6 +114,8 @@ def run_until_complete(client, dispatcher, interaction: dict, *,
             tools=tools,
         )
         steps_taken += 1
+        if on_round is not None:
+            on_round(interaction)
 
     return interaction
 
@@ -117,7 +125,8 @@ def wait_until_done(client, dispatcher, interaction: dict, *,
                     max_polls: int = 360,
                     system_instruction=None,
                     tools=None,
-                    on_event=None) -> dict:
+                    on_event=None,
+                    on_round=None) -> dict:
     """Follow a background interaction to a terminal status (G13).
 
     A background create returns while the work is still running, and the
@@ -145,6 +154,6 @@ def wait_until_done(client, dispatcher, interaction: dict, *,
             interaction = run_until_complete(
                 client, dispatcher, interaction,
                 system_instruction=system_instruction, tools=tools,
-                on_event=on_event,
+                on_event=on_event, on_round=on_round,
             )
     return interaction

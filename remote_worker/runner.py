@@ -492,7 +492,8 @@ class TaskRunner:
         })
 
         final = run_until_complete(self.client, self.dispatcher, interaction,
-                                   system_instruction=contract, tools=tools)
+                                   system_instruction=contract, tools=tools,
+                                   on_round=self._round_persister(task_id))
         if background:
             try:
                 final = wait_until_done(
@@ -500,6 +501,7 @@ class TaskRunner:
                     poll_interval=self.poll_interval,
                     max_polls=self.max_polls,
                     system_instruction=contract, tools=tools,
+                    on_round=self._round_persister(task_id),
                 )
             except WatchLimitExceeded as exc:
                 # The watch ended, not the task: the interaction may still
@@ -599,6 +601,23 @@ class TaskRunner:
             sources.append(source)
         return sources
 
+    def _round_persister(self, task_id: str):
+        """Persist the live interaction after every loop round (hardening S7).
+
+        Each round creates a NEW interaction, and a process killed between
+        rounds would otherwise leave the record naming the previous one with
+        a creation-time status -- so `continue` refused and `status --live`
+        read a stale id. Writing the newest id with status `in_progress`
+        after every round makes the record resumable at any point.
+        """
+        def persist(interaction: dict) -> None:
+            self.store.record({
+                "task_id": task_id,
+                "interaction_id": interaction.get("id"),
+                "status": "in_progress",
+            })
+        return persist
+
     def _prepare_tests_clone(self, clone_dir: str) -> str:
         """A fresh copy of the clone to run the tests in.
 
@@ -616,10 +635,15 @@ class TaskRunner:
                       memory_save: bool = False,
                       execute_tests: bool = False) -> dict:
         record = self.store.get(task_id)
-        if record.get("status") != "incomplete":
+        # Hardening S7: a mid-loop death leaves the record `in_progress` with
+        # the newest interaction id. That is a resumable conversation, not a
+        # finished one, so it continues exactly like a budget stop.
+        resumable = {"incomplete", "in_progress"}
+        if record.get("status") not in resumable:
             raise ValueError(
                 f"task {task_id} is {record.get('status')!r}; "
-                "only an incomplete task can continue"
+                "only an incomplete or interrupted (in_progress) task can "
+                "continue"
             )
         config = agent_config(model=record.get("model"), budget=budget)
         if self.memory_enabled:
@@ -698,7 +722,9 @@ class TaskRunner:
             final = run_until_complete(self.client, self.dispatcher,
                                        interaction,
                                        system_instruction=contract,
-                                       tools=tools)
+                                       tools=tools,
+                                       on_round=self._round_persister(
+                                           task_id))
         except InteractionsError as exc:
             # G9: a 404 here means the sandbox is gone (7-day TTL) or the
             # conversation id no longer resolves. Either way the task is
@@ -1085,7 +1111,8 @@ class TaskRunner:
         })
 
         final = run_until_complete(self.client, self.dispatcher, interaction,
-                                   system_instruction=contract, tools=tools)
+                                   system_instruction=contract, tools=tools,
+                                   on_round=self._round_persister(task_id))
         if background:
             try:
                 final = wait_until_done(
@@ -1093,6 +1120,7 @@ class TaskRunner:
                     poll_interval=self.poll_interval,
                     max_polls=self.max_polls,
                     system_instruction=contract, tools=tools,
+                    on_round=self._round_persister(task_id),
                 )
             except WatchLimitExceeded as exc:
                 report = (f"still running when our watch ended ({exc}); the "
