@@ -260,6 +260,95 @@ class TaskRunner:
             return None
         return proc.stdout.strip()
 
+    def _deliver(self, *, task_id, branch, environment_id, repo_url,
+                 repo_name, result, execute_tests, delete_env=False):
+        """Bring a completed task's workspace home (shared by run/continue).
+
+        Delivery is the one step of a completed task that can still fail, and
+        it failed for real: the download of a 3.6 GiB workspace answered 500
+        after the agent had spent 93k tokens (L39). The bytes were still in
+        the sandbox; the task record said `completed` and the raw error
+        escaped. So the return path is taken as a unit with a stated outcome:
+        either the work lands on a branch, or the task says `undelivered` and
+        names how to recover it. A half-written archive is never left behind.
+
+        Hardening S3: this is the one delivery operation, called by both
+        :meth:`run` and :meth:`continue_task`, so a continuation that
+        completes stops being the path that never came home.
+        """
+        os.makedirs(self.workdir, exist_ok=True)
+        tar_path = os.path.join(self.workdir, f"{task_id}.tar")
+        try:
+            self.files.download_to(environment_id, "workspace", tar_path)
+            applied = apply_to_branch(
+                tar_path=tar_path, repo_url=repo_url, branch=branch,
+                workdir=os.path.join(self.workdir, "clone"),
+                repo_dir=repo_name,
+            )
+        except (InteractionsError, InteractionsTimeoutError, GitError,
+                tarfile.TarError, OSError) as exc:
+            return self._undelivered(task_id, branch=branch,
+                                     environment_id=environment_id,
+                                     result=result, exc=exc)
+        finally:
+            # The workspace archive is the whole sandbox tree. Nothing after
+            # this reads it, so it goes now rather than accumulating one copy
+            # per task -- including the partial one a failed download leaves.
+            if os.path.exists(tar_path):
+                os.remove(tar_path)
+        # Hardening S1: the delivered tree was written by a prompted agent.
+        # Running its tests is executing that code on the user's machine, so
+        # it never happens unless the user says so with --run-tests; the
+        # report says tests were not run, so a clean exit is never read as a
+        # green suite.
+        if execute_tests:
+            # The diff the user reviews must not contain artifacts that the
+            # test run will add, so the tests run against a throwaway copy.
+            tests_clone = self._prepare_tests_clone(applied["clone_dir"])
+            tests_rc, tests_output = run_tests(
+                tests_clone, DEFAULT_TEST_COMMAND)
+            result.update({
+                "clone_dir": applied["clone_dir"],
+                "changed": applied["changed"],
+                "diff": applied["diff"],
+                "tests_rc": tests_rc,
+                "tests_output": tests_output,
+            })
+            self.store.record({
+                "task_id": task_id,
+                "branch": branch,
+                "clone_dir": applied["clone_dir"],
+                "changed": applied["changed"],
+                "tests_rc": tests_rc,
+            })
+        else:
+            result.update({
+                "clone_dir": applied["clone_dir"],
+                "changed": applied["changed"],
+                "diff": applied["diff"],
+                "tests_rc": None,
+                "tests_skipped": True,
+            })
+            self.store.record({
+                "task_id": task_id,
+                "branch": branch,
+                "clone_dir": applied["clone_dir"],
+                "changed": applied["changed"],
+                "tests_skipped": True,
+            })
+        if delete_env:
+            # The delivery is verified at this point (the branch exists), so
+            # the sandbox is a redundant copy and releasing it early is safe
+            # (T25/L42). A failed delete must not turn a delivered run into a
+            # failure: the outcome is the delivery, and the error is named.
+            try:
+                self.environments.delete_environment(environment_id)
+                result["env_released"] = True
+            except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+                result["env_released"] = False
+                result["env_release_error"] = str(exc)
+        return result
+
     def run(self, *, task: str, repo_url: str | None = None,
             model: str | None = None,
             budget: int | None = None,
@@ -457,86 +546,13 @@ class TaskRunner:
         if status != "completed":
             return result  # incomplete / failed: nothing to bring back
 
-        environment_id = final.get("environment_id")
-        os.makedirs(self.workdir, exist_ok=True)
-        tar_path = os.path.join(self.workdir, f"{task_id}.tar")
-        # Delivery is the one step of a completed task that can still fail, and
-        # it failed for real: the download of a 3.6 GiB workspace answered 500
-        # after the agent had spent 93k tokens (L39). The bytes were still in
-        # the sandbox; the task record said `completed` and the raw error
-        # escaped. So the return path is taken as a unit with a stated outcome:
-        # either the work lands on a branch, or the task says `undelivered` and
-        # names how to recover it. A half-written archive is never left behind.
-        try:
-            self.files.download_to(environment_id, "workspace", tar_path)
-            applied = apply_to_branch(
-                tar_path=tar_path, repo_url=repo_url, branch=branch,
-                workdir=os.path.join(self.workdir, "clone"),
-                repo_dir=repo_name,
-            )
-        except (InteractionsError, InteractionsTimeoutError, GitError,
-                tarfile.TarError, OSError) as exc:
-            return self._undelivered(task_id, branch=branch,
-                                     environment_id=environment_id,
-                                     result=result, exc=exc)
-        finally:
-            # The workspace archive is the whole sandbox tree. Nothing after
-            # this reads it, so it goes now rather than accumulating one copy
-            # per task -- including the partial one a failed download leaves.
-            if os.path.exists(tar_path):
-                os.remove(tar_path)
-        # Hardening S1: the delivered tree was written by a prompted agent.
-        # Running its tests is executing that code on the user's machine, so
-        # it never happens unless the user says so with --run-tests; the
-        # report says tests were not run, so a clean exit is never read as a
-        # green suite.
-        if execute_tests:
-            # The diff the user reviews must not contain artifacts that the
-            # test run will add, so the tests run against a throwaway copy.
-            tests_clone = self._prepare_tests_clone(applied["clone_dir"])
-            tests_rc, tests_output = run_tests(
-                tests_clone, DEFAULT_TEST_COMMAND)
-            result.update({
-                "clone_dir": applied["clone_dir"],
-                "changed": applied["changed"],
-                "diff": applied["diff"],
-                "tests_rc": tests_rc,
-                "tests_output": tests_output,
-            })
-            self.store.record({
-                "task_id": task_id,
-                "branch": branch,
-                "clone_dir": applied["clone_dir"],
-                "changed": applied["changed"],
-                "tests_rc": tests_rc,
-            })
-        else:
-            result.update({
-                "clone_dir": applied["clone_dir"],
-                "changed": applied["changed"],
-                "diff": applied["diff"],
-                "tests_rc": None,
-                "tests_skipped": True,
-            })
-            self.store.record({
-                "task_id": task_id,
-                "branch": branch,
-                "clone_dir": applied["clone_dir"],
-                "changed": applied["changed"],
-                "tests_skipped": True,
-            })
-        if delete_env:
-            # The delivery is verified at this point (the branch exists), so
-            # the sandbox is a redundant copy and releasing it early is safe
-            # (T25/L42). A failed delete must not turn a delivered run into a
-            # failure: the outcome is the delivery, and the error is named.
-            try:
-                self.environments.delete_environment(environment_id)
-                result["env_released"] = True
-            except Exception as exc:  # noqa: BLE001 - reported, not swallowed
-                result["env_released"] = False
-                result["env_release_error"] = str(exc)
-        return result
+        return self._deliver(
+            task_id=task_id, branch=branch,
+            environment_id=final.get("environment_id"),
+            repo_url=repo_url, repo_name=repo_name,
+            result=result, execute_tests=execute_tests,
+            delete_env=delete_env,
+        )
 
     def _undelivered(self, task_id, *, branch, environment_id, result, exc):
         """Record a task whose agent finished but whose bytes did not arrive.
@@ -712,14 +728,37 @@ class TaskRunner:
             "tokens": tokens,
             "report": self.client.last_model_output(final),
         })
-        return {
+        result = {
             "task_id": task_id,
             "status": status,
             "tokens": tokens,
             "budget": config["max_total_tokens"],
             "branch": record.get("branch"),
+            "environment_id": final.get("environment_id"),
             "report": self.client.last_model_output(final),
         }
+        if status != "completed":
+            return result  # incomplete / failed: nothing to bring back
+        # Hardening S3: a continuation that completed is a paid-for result,
+        # and it comes home through the same delivery a run uses. The record
+        # already names the repository and branch the first turn declared.
+        repo_url = record.get("repo_url")
+        repo_dir = record.get("repo_dir")
+        repo_name = os.path.basename((repo_dir or "").rstrip("/")) or None
+        if not repo_url or not repo_name:
+            # An ask-style record has no repository to deliver to; the text
+            # report is the whole result.
+            return result
+        # A record from before the branch was pinned names none; derive the
+        # same shape `run` uses so the work still lands somewhere reviewable.
+        branch = record.get("branch") or f"worker/{repo_name}-{task_id}"
+        return self._deliver(
+            task_id=task_id, branch=branch,
+            environment_id=final.get("environment_id"),
+            repo_url=repo_url, repo_name=repo_name,
+            result=result, execute_tests=execute_tests,
+            delete_env=False,
+        )
 
     # Statuses after which an environment is certainly no longer needed.
     # `undelivered` is deliberately NOT here: that task's sandbox is the only

@@ -22,11 +22,12 @@ import tempfile
 import unittest
 
 from tests.fake_interactions import FakeInteractionsServer
+from tests.test_delivery_failure import _make_origin, _worker_tar_bytes
 
 try:
     from remote_worker.runner import TaskRunner
     from remote_worker.state import TaskStore
-    from remote_worker.google_client import InteractionsClient
+    from remote_worker.google_client import FilesClient, InteractionsClient
 except ImportError:
     TaskRunner = None
 
@@ -139,11 +140,15 @@ class TestContractResend(unittest.TestCase):
 
     # Rule 4: continue_task rebuilds contract+tools from the record.
     def test_continue_task_sends_contract_and_tools(self):
+        # Hardening S3: a completed continuation now DELIVERS, so the record
+        # needs a repository that can actually be cloned and a workspace tar
+        # that applies. The wire assertions below are unchanged.
+        origin = _make_origin(self._tmp.name)
         self.store.record({
             "task_id": "t_old", "kind": "run", "status": "incomplete",
             "interaction_id": "v9", "environment_id": "env_9",
-            "repo_url": "https://github.com/o/repo-x",
-            "repo_dir": "/workspace/repo-x",
+            "repo_url": origin,
+            "repo_dir": "/workspace/origin",
             "model": "gemini-3.8-flash", "budget": 150000,
             "task": "earlier task",
         })
@@ -152,14 +157,20 @@ class TestContractResend(unittest.TestCase):
             # continuation is sent and completes.
             srv.get_replies.append((200, json.dumps(
                 _interaction("completed", iid="v9")).encode()))
+            srv.get_replies.append((200, _worker_tar_bytes()))
             srv.reply_body = _interaction("completed", iid="v10")
             runner = self._runner(srv)
+            runner._files = FilesClient(api_key="AQ.k", base_url=srv.base_url)
             result = runner.continue_task(task_id="t_old")
-            body = srv.last_body
+            # The delivery adds GETs after the continuation POST, so read the
+            # continuation off the POST list rather than the last request.
+            body = json.loads(
+                [r for r in srv.requests if r["method"] == "POST"][-1]["body"]
+            )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(body["previous_interaction_id"], "v9")
         self.assertIn("AGENTS.md", body["system_instruction"])
-        self.assertIn("/workspace/repo-x", body["system_instruction"])
+        self.assertIn("/workspace/origin", body["system_instruction"])
         self.assertIn({"type": "code_execution"}, body["tools"])
 
     # Rule 5: a pre-fix record without repo_dir still continues.
@@ -174,8 +185,10 @@ class TestContractResend(unittest.TestCase):
         with FakeInteractionsServer() as srv:
             srv.get_replies.append((200, json.dumps(
                 _interaction("completed", iid="v9")).encode()))
+            srv.get_replies.append((200, _worker_tar_bytes()))
             srv.reply_body = _interaction("completed", iid="v10")
             runner = self._runner(srv)
+            runner._files = FilesClient(api_key="AQ.k", base_url=srv.base_url)
             result = runner.continue_task(task_id="t_legacy")
             body = srv.last_body
         self.assertEqual(result["status"], "completed")
