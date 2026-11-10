@@ -107,6 +107,32 @@ def _gcs_name(uri: str) -> str:
     return parts[-1] if parts else ""
 
 
+def _remote_head(repo_url: str) -> str | None:
+    """The remote commit a mounted repository will hand the sandbox.
+
+    The sandbox clones ``repo_url`` on its own (the ``repository`` source),
+    so the exact point it receives is the remote HEAD at mount time. Capture
+    that with ``git ls-remote`` just before the task starts: it is the
+    closest honest proxy for the snapshot identity (P0-1) without cloning
+    locally. None when the repo is unreachable from this machine (e.g. a
+    host that only the sandbox can reach) -- the task then runs without a
+    pinned base and keeps the pre-P0-1 behaviour.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-remote", repo_url, "HEAD"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    line = proc.stdout.strip()
+    if not line:
+        return None
+    return line.split()[0] or None
+
+
 class TaskRunner:
     """Runs a delegated task and brings the result back."""
 
@@ -211,7 +237,8 @@ class TaskRunner:
             if os.path.exists(archive_path):
                 os.remove(archive_path)
         return {"id": environment_id, "archive_bytes": archive["bytes"],
-                "archive_files": archive["files"]}
+                "archive_files": archive["files"],
+                "base_commit": archive["base_commit"]}
 
     def _release_environment(self, environment_id: str) -> bool:
         """Best-effort delete of a sandbox this attempt made and cannot use."""
@@ -262,7 +289,8 @@ class TaskRunner:
         return proc.stdout.strip()
 
     def _deliver(self, *, task_id, branch, environment_id, repo_url,
-                 repo_name, result, execute_tests, delete_env=False):
+                 repo_name, result, execute_tests, delete_env=False,
+                 base_commit=None):
         """Bring a completed task's workspace home (shared by run/continue).
 
         Delivery is the one step of a completed task that can still fail, and
@@ -284,7 +312,7 @@ class TaskRunner:
             applied = apply_to_branch(
                 tar_path=tar_path, repo_url=repo_url, branch=branch,
                 workdir=os.path.join(self.workdir, "clone"),
-                repo_dir=repo_name,
+                repo_dir=repo_name, base_commit=base_commit,
             )
         except (InteractionsError, InteractionsTimeoutError, GitError,
                 tarfile.TarError, OSError) as exc:
@@ -312,6 +340,7 @@ class TaskRunner:
                 "clone_dir": applied["clone_dir"],
                 "changed": applied["changed"],
                 "diff": applied["diff"],
+                "base_moved": applied.get("base_moved", False),
                 "tests_rc": tests_rc,
                 "tests_output": tests_output,
             })
@@ -320,6 +349,7 @@ class TaskRunner:
                 "branch": branch,
                 "clone_dir": applied["clone_dir"],
                 "changed": applied["changed"],
+                "base_moved": applied.get("base_moved", False),
                 "tests_rc": tests_rc,
             })
         else:
@@ -327,6 +357,7 @@ class TaskRunner:
                 "clone_dir": applied["clone_dir"],
                 "changed": applied["changed"],
                 "diff": applied["diff"],
+                "base_moved": applied.get("base_moved", False),
                 "tests_rc": None,
                 "tests_skipped": True,
             })
@@ -335,6 +366,7 @@ class TaskRunner:
                 "branch": branch,
                 "clone_dir": applied["clone_dir"],
                 "changed": applied["changed"],
+                "base_moved": applied.get("base_moved", False),
                 "tests_skipped": True,
             })
         if delete_env:
@@ -477,6 +509,17 @@ class TaskRunner:
             tools=tools,
             background=background,
         )
+        # P0-1: name the exact snapshot this task sent, so the delivery can be
+        # anchored on it instead of the remote line that may advance while the
+        # agent works. local-repo names the HEAD it packed; a remote repository
+        # names the HEAD the sandbox is about to mount; a gcs source has no
+        # git base (it is a bucket, not a repo) and stays unpinned.
+        if local_repo is not None:
+            base_commit = upload_info["base_commit"]
+        elif repo_url is not None:
+            base_commit = _remote_head(repo_url)
+        else:
+            base_commit = None
         self.store.record(create=True, task={
             "task_id": task_id,
             "kind": "run",
@@ -485,6 +528,7 @@ class TaskRunner:
             "environment_id": interaction.get("environment_id"),
             "repo_url": repo_url,
             "repo_dir": repo_dir,
+            "base_commit": base_commit,
             "branch": branch,
             "model": config["model"],
             "budget": config["max_total_tokens"],
@@ -554,7 +598,7 @@ class TaskRunner:
             environment_id=final.get("environment_id"),
             repo_url=repo_url, repo_name=repo_name,
             result=result, execute_tests=execute_tests,
-            delete_env=delete_env,
+            delete_env=delete_env, base_commit=base_commit,
         )
 
     def _undelivered(self, task_id, *, branch, environment_id, result, exc):
@@ -785,6 +829,7 @@ class TaskRunner:
             repo_url=repo_url, repo_name=repo_name,
             result=result, execute_tests=execute_tests,
             delete_env=False,
+            base_commit=record.get("base_commit"),
         )
 
     # Statuses after which an environment is certainly no longer needed.

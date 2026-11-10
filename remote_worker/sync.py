@@ -84,10 +84,18 @@ def archive_repo(repo_path: str, dest: str) -> dict:
     home, which is also what the return path expects, since it overlays files
     onto a fresh clone rather than trusting the sandbox's history.
 
-    Returns ``{"path", "bytes", "files"}``.
+    Returns ``{"path", "bytes", "files", "base_commit"}``. ``base_commit``
+    is the repository HEAD the snapshot was packed from, so the delivery can
+    be anchored on the exact point Antigravity received instead of the remote
+    line that may have advanced meanwhile (P0-1).
     """
     if not os.path.isdir(repo_path):
         raise ValueError(f"local repository {repo_path!r} is not a directory")
+    base_commit = _git(repo_path, "rev-parse", "HEAD").stdout.strip()
+    if not base_commit:
+        raise ValueError(
+            f"local repository {repo_path!r} has no commit to snapshot"
+        )
     tracked = _git(repo_path, "ls-files", "-z").stdout
     untracked = _git(repo_path, "ls-files", "-z", "--others",
                      "--exclude-standard").stdout
@@ -107,7 +115,8 @@ def archive_repo(repo_path: str, dest: str) -> dict:
             # would both duplicate entries and drag in ignored files.
             tar.add(full, arcname=name, recursive=False)
             written += 1
-    return {"path": dest, "bytes": os.path.getsize(dest), "files": written}
+    return {"path": dest, "bytes": os.path.getsize(dest),
+            "files": written, "base_commit": base_commit}
 
 
 def inline_source(local_path: str, target: str,
@@ -238,7 +247,8 @@ def _workspace_paths(source_root: str) -> list[str]:
 
 
 def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
-                    workdir: str, repo_dir: str | None = None) -> dict:
+                    workdir: str, repo_dir: str | None = None,
+                    base_commit: str | None = None) -> dict:
     """Apply a downloaded workspace tar onto a fresh clone, on a new branch.
 
     "Fresh" is load-bearing twice. Across repositories: the clone path is
@@ -252,9 +262,20 @@ def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
     line and the delivery is committed, so the next task's diff --cached
     can only ever hold its own work.
 
-    Returns ``{"clone_dir", "diff", "changed"}``. ``changed`` lists the
-    ``git status --short`` lines taken before the commit so the caller can
-    report what moved; the index is clean afterwards.
+    ``base_commit`` pins the delivery to the snapshot the task actually
+    sent (P0-1). Without it the branch would be reset to the CURRENT remote
+    main line, which may have advanced past the point Antigravity saw -- a
+    delivery built over the old snapshot would then, through
+    :func:`_drop_removed`, delete files the advancing branch added. With it
+    the branch is anchored on that exact commit and ``base_moved``
+    reports (as a reconciliation signal, not an error) when the live remote
+    main is no longer the recorded snapshot.
+
+    Returns ``{"clone_dir", "diff", "changed", "base_moved"}``.
+    ``changed`` lists the ``git status --short`` lines taken before the
+    commit so the caller can report what moved; the index is clean
+    afterwards. ``base_moved`` is True only when ``base_commit`` was given
+    and the remote main line is not that commit.
     """
     clone = os.path.abspath(workdir)
     if not _clone_of(clone, repo_url):
@@ -266,7 +287,16 @@ def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
         _git(clone, "fetch", "-q", "origin")
     except GitError:
         pass  # offline: the cached remote refs still bound the main line
-    base = _remote_base(clone)
+    base = base_commit or _remote_base(clone)
+    remote = _remote_base(clone)
+    # The branch moved when the remote's main line is no longer the exact
+    # snapshot the task was built from. Resolve the live ref to its commit
+    # first (``_is_ancestor`` would be the wrong test: the snapshot is always
+    # an ancestor of the advanced line).
+    base_moved = False
+    if base_commit and remote:
+        live = _git(clone, "rev-parse", remote).stdout.strip()
+        base_moved = live != base_commit
     _git(clone, "checkout", "-q", "-B", branch, *([base] if base else []))
 
     with tempfile.TemporaryDirectory(prefix="worker-tar-") as scratch:
@@ -299,7 +329,8 @@ def apply_to_branch(*, tar_path: str, repo_url: str, branch: str,
     if changed:
         _git(clone, "commit", "-q", "-m",
              f"remote-worker delivery on {branch}")
-    return {"clone_dir": clone, "diff": diff, "changed": changed}
+    return {"clone_dir": clone, "diff": diff, "changed": changed,
+            "base_moved": base_moved}
 
 
 def _remote_base(clone: str) -> str | None:

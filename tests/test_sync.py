@@ -525,6 +525,80 @@ class DeliveryFreshnessTest(unittest.TestCase):
         self.assertEqual(count.stdout.strip(), "2")
 
 
+class SnapshotBaseTest(unittest.TestCase):
+    """P0-1: the delivery is built against the exact snapshot the task sent,
+    never against the remote line that may have advanced meanwhile.
+
+    The old apply reset the branch to the CURRENT remote main line, so a
+    branch that moved from A to B during the task absorbed a delivery that
+    was built over A -- and `_drop_removed` then deleted B's files as if the
+    workspace had dropped them. Passing the recorded ``base_commit`` anchors
+    the delivery on the point Antigravity actually received.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = self._tmp.name
+        self.origin = make_origin(self.tmp)  # commit A
+        self.base_a = git(self.origin, "rev-parse", "HEAD").stdout.strip()
+        # The remote advances to B while the task runs.
+        with open(os.path.join(self.origin, "b_only.py"), "w") as fh:
+            fh.write("ADDED = True\n")
+        git(self.origin, "add", "b_only.py")
+        git(self.origin, "commit", "-qm", "advance to B")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    MAIN = "def add(a, b):\n    return a + b\n"
+
+    def _tar(self, files, name="ws.tar"):
+        path = os.path.join(self.tmp, name)
+        with tarfile.open(path, "w"):
+            pass
+        for rel, data in files.items():
+            add_member(path, f"worker-repo/{rel}", data=data)
+        return path
+
+    def _apply(self, files, base_commit=None, name="ws.tar"):
+        return apply_to_branch(
+            tar_path=self._tar(files, name), repo_url=self.origin,
+            branch="worker/snap", workdir=os.path.join(self.tmp, "clone"),
+            repo_dir="worker-repo", base_commit=base_commit,
+        )
+
+    def test_delivery_is_anchored_on_the_snapshot_not_the_live_head(self):
+        # The workspace reflects A. Anchoring the delivery on A means the
+        # branch of delivery is built from A (B's b_only.py is simply not part
+        # of it), and the live main -- where B lives -- keeps b_only.py
+        # untouched. Without a base, the delivery would be built over B and
+        # `_drop_removed` would DELETE b_only.py from the delivered branch.
+        result = self._apply({"main.py": self.MAIN}, base_commit=self.base_a)
+        clone = result["clone_dir"]
+        # B's file is not part of the A-anchored delivery branch...
+        self.assertFalse(os.path.exists(os.path.join(clone, "b_only.py")))
+        self.assertNotIn("b_only.py", result["diff"])
+        # ...but the live main that B advanced is never mutated.
+        main = git(clone, "show", "origin/main:b_only.py").stdout
+        self.assertIn("ADDED", main)
+
+    def test_delivery_reports_when_the_live_branch_has_moved(self):
+        # The signal a later user/harness needs to reconcile: the remote main
+        # is no longer the point this task was built from.
+        result = self._apply({"main.py": self.MAIN}, base_commit=self.base_a)
+        self.assertTrue(result["base_moved"])
+
+    def test_delivery_without_a_base_still_uses_the_live_head(self):
+        # Legacy records carry no base_commit; those keep the old behaviour
+        # (deliver against the current remote main, so a file the branch
+        # added while the task ran is dropped).
+        result = self._apply({"main.py": self.MAIN})
+        clone = result["clone_dir"]
+        self.assertFalse(os.path.exists(os.path.join(clone, "b_only.py")))
+        self.assertFalse(result["base_moved"])
+
+
+
 class DeliveryCommitScopeTest(unittest.TestCase):
     """The delivery commit holds exactly the workspace, and nothing else.
 

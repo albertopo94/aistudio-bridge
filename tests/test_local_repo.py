@@ -181,11 +181,67 @@ class ArchiveRepoTest(unittest.TestCase):
         self.assertEqual(info["bytes"], os.path.getsize(dest))
         self.assertEqual(info["files"], len(names))
 
+    def test_archive_records_the_base_commit_of_the_snapshot(self):
+        # P0-1: the delivery must be built against the exact point Antigravity
+        # received, so archive_repo names the HEAD it packed. Without this the
+        # branch that advanced during the task would absorb a delivery built
+        # over an older snapshot.
+        repo = _make_repo(self._tmp.name)
+        dest = os.path.join(self._tmp.name, "out.tar.gz")
+        info = sync.archive_repo(repo, dest)
+        proc = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
+                              capture_output=True, text=True, check=True)
+        self.assertEqual(info["base_commit"], proc.stdout.strip())
+
+    def test_archive_refuses_when_the_repo_has_no_commit(self):
+        # A repo with files but no commit cannot name a base point.
+        plain = os.path.join(self._tmp.name, "unborn")
+        os.makedirs(plain)
+        with open(os.path.join(plain, "a.py"), "w") as fh:
+            fh.write("x = 1\n")
+        _git(plain, "init", "-q")
+        _git(plain, "add", "a.py")
+        with self.assertRaises(Exception):
+            sync.archive_repo(plain, os.path.join(self._tmp.name, "x.tar.gz"))
+
     def test_a_plain_directory_is_refused_before_anything_is_sent(self):
         plain = os.path.join(self._tmp.name, "plain")
         os.makedirs(plain)
         with self.assertRaises(Exception):
             sync.archive_repo(plain, os.path.join(self._tmp.name, "x.tar.gz"))
+
+
+class RemoteHeadTest(unittest.TestCase):
+    """P0-1: the remote HEAD a mounted repository would hand the sandbox is
+    captured for the task record, and an unreachable repo yields None."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = os.path.join(self._tmp.name, "origin")
+        os.makedirs(self.repo)
+        subprocess.run(["git", "-C", self.repo, "init", "-q"], check=True)
+        with open(os.path.join(self.repo, "main.py"), "w") as fh:
+            fh.write("x = 1\n")
+        subprocess.run(["git", "-C", self.repo, "add", "main.py"],
+                       check=True)
+        subprocess.run(["git", "-C", self.repo, "-c", "user.name=t",
+                        "-c", "user.email=t@t", "commit", "-qm",
+                        "initial"], check=True)
+
+    def test_remote_head_is_captured_for_a_reachable_repo(self):
+        from remote_worker import runner as runner_module
+        head = subprocess.run(["git", "-C", self.repo, "rev-parse",
+                               "HEAD"], capture_output=True, text=True,
+                              check=True).stdout.strip()
+        captured = runner_module._remote_head(self.repo)
+        self.assertEqual(captured, head)
+
+    def test_remote_head_is_none_for_an_unreachable_repo(self):
+        from remote_worker import runner as runner_module
+        self.assertIsNone(
+            runner_module._remote_head("http://127.0.0.1:1/nope/repo.git")
+        )
 
 
 class LocalRepoRunTest(unittest.TestCase):
@@ -249,6 +305,33 @@ class LocalRepoRunTest(unittest.TestCase):
                 runner.run(task="x", local_repo=repo)
         self.assertEqual(seen["repo_url"], os.path.abspath(repo))
         self.assertEqual(seen["repo_dir"], "r")
+
+    def test_the_delivery_is_anchored_on_the_snapshot_base_commit(self):
+        # P0-1: the base_commit that run() captured from the archive must reach
+        # apply_to_branch, so the delivery is anchored on the exact point the
+        # sandbox received -- not the remote line that may advance meanwhile.
+        repo = _make_repo(self._tmp.name)
+        head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
+                              capture_output=True, text=True,
+                              check=True).stdout.strip()
+        with FakeSandboxServer() as srv:
+            runner = self._runner(srv)
+            seen = {}
+
+            def fake_apply(**kwargs):
+                seen.update(kwargs)
+                return {"clone_dir": "c", "diff": "", "changed": []}
+
+            srv.interaction = dict(srv.interaction, status="completed")
+            with mock.patch("remote_worker.runner.apply_to_branch", fake_apply), \
+                    mock.patch.object(runner, "_prepare_tests_clone",
+                                      lambda clone: clone), \
+                    mock.patch("remote_worker.runner.run_tests",
+                               lambda *a, **k: (0, "")), \
+                    mock.patch.object(type(runner.files), "download_to",
+                                      lambda *a, **k: None):
+                runner.run(task="x", local_repo=repo)
+        self.assertEqual(seen["base_commit"], head)
 
 
 class CliTest(unittest.TestCase):

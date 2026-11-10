@@ -305,7 +305,8 @@ class FairUseTranslationTest(unittest.TestCase):
             # what matters here is that no local check stops the attempt.
             with open(dest, "wb") as handle:
                 handle.write(b"x" * 32)
-            return {"bytes": 2 * 1024 ** 3, "files": 1}
+            return {"bytes": 2 * 1024 ** 3, "files": 1,
+                    "base_commit": "a" * 40}
 
         with FakeSandboxServer(upload_status=200,
                                upload_body='{"files":[]}'
