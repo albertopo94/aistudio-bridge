@@ -316,21 +316,51 @@ def _drop_removed(clone: str, source_root: str) -> None:
             shutil.rmtree(target)
 
 
+#: The only environment variables a test child inherits (hardening S1).
+#: Everything else -- API keys, tokens, SSH agent, cloud credentials -- stays
+#: with the parent: the code under test was written by a prompted agent, and
+#: a directory name is not a sandbox.
+TEST_ENV_ALLOWLIST = frozenset({
+    "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TEMP", "TMP",
+    "SYSTEMROOT", "TERM", "SHELL",
+})
+
+
+def test_env(home: str) -> dict[str, str]:
+    """The scrubbed environment a delivered project's tests run in.
+
+    Allowlist, never a blocklist: a variable nobody thought of cannot leak.
+    ``HOME`` is replaced with the scratch directory so ``~/.ssh``,
+    ``~/.aws`` or a dotfile with a token is out of reach.
+    """
+    env = {
+        name: os.environ[name]
+        for name in TEST_ENV_ALLOWLIST
+        if name in os.environ
+    }
+    env["HOME"] = home
+    # The user reviews the clone's git diff after the tests run, so the test
+    # run must not add build artifacts that would appear as untracked changes.
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
 def run_tests(workdir: str, command: list[str],
-              timeout: float = 1800.0) -> tuple[int, str]:
+              timeout: float = 1800.0,
+              env: dict[str, str] | None = None) -> tuple[int, str]:
     """Run the project's own test command inside the clone.
 
     Returns ``(returncode, combined_output)``. A non-zero status is a result,
     not an exception: the caller reports it.
+
+    The child gets a scrubbed environment by default (hardening S1); pass
+    ``env`` only for a caller that means to hand it specific variables.
     """
-    env = dict(os.environ)
-    # The user reviews the clone's git diff after the tests run, so the test
-    # run must not add build artifacts that would appear as untracked changes.
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    child_env = test_env(os.path.abspath(workdir)) if env is None else env
     try:
         proc = subprocess.run(
             command, cwd=workdir, capture_output=True, text=True,
-            timeout=timeout, env=env,
+            timeout=timeout, env=child_env,
         )
     except subprocess.TimeoutExpired:
         return 124, f"test command timed out after {timeout}s"

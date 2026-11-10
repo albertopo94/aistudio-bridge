@@ -318,7 +318,7 @@ class _BudgetOnlyRunner:
     def __init__(self, store):
         self.store = store
 
-    def continue_task(self, *, task_id, budget=None, memory_save=False):
+    def continue_task(self, *, task_id, budget=None, memory_save=False, execute_tests=False):
         return {"task_id": task_id, "status": "incomplete",
                 "tokens": 1000, "budget": 1000, "reason": "budget"}
 

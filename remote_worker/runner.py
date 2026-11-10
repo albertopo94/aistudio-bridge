@@ -274,7 +274,8 @@ class TaskRunner:
             delete_env: bool = False,
             gcs_source: str | None = None,
             gcs_token_file: str | None = None,
-            memory_save: bool = False) -> dict:
+            memory_save: bool = False,
+            execute_tests: bool = False) -> dict:
         config = agent_config(model=model, budget=budget)
         if self.memory_enabled:
             self.dispatcher.allow_save = memory_save
@@ -484,24 +485,46 @@ class TaskRunner:
             # per task -- including the partial one a failed download leaves.
             if os.path.exists(tar_path):
                 os.remove(tar_path)
-        # The diff the user reviews must not contain artifacts that the test
-        # run will add, so the tests run against a throwaway copy.
-        tests_clone = self._prepare_tests_clone(applied["clone_dir"])
-        tests_rc, tests_output = run_tests(tests_clone, DEFAULT_TEST_COMMAND)
-        result.update({
-            "clone_dir": applied["clone_dir"],
-            "changed": applied["changed"],
-            "diff": applied["diff"],
-            "tests_rc": tests_rc,
-            "tests_output": tests_output,
-        })
-        self.store.record({
-            "task_id": task_id,
-            "branch": branch,
-            "clone_dir": applied["clone_dir"],
-            "changed": applied["changed"],
-            "tests_rc": tests_rc,
-        })
+        # Hardening S1: the delivered tree was written by a prompted agent.
+        # Running its tests is executing that code on the user's machine, so
+        # it never happens unless the user says so with --run-tests; the
+        # report says tests were not run, so a clean exit is never read as a
+        # green suite.
+        if execute_tests:
+            # The diff the user reviews must not contain artifacts that the
+            # test run will add, so the tests run against a throwaway copy.
+            tests_clone = self._prepare_tests_clone(applied["clone_dir"])
+            tests_rc, tests_output = run_tests(
+                tests_clone, DEFAULT_TEST_COMMAND)
+            result.update({
+                "clone_dir": applied["clone_dir"],
+                "changed": applied["changed"],
+                "diff": applied["diff"],
+                "tests_rc": tests_rc,
+                "tests_output": tests_output,
+            })
+            self.store.record({
+                "task_id": task_id,
+                "branch": branch,
+                "clone_dir": applied["clone_dir"],
+                "changed": applied["changed"],
+                "tests_rc": tests_rc,
+            })
+        else:
+            result.update({
+                "clone_dir": applied["clone_dir"],
+                "changed": applied["changed"],
+                "diff": applied["diff"],
+                "tests_rc": None,
+                "tests_skipped": True,
+            })
+            self.store.record({
+                "task_id": task_id,
+                "branch": branch,
+                "clone_dir": applied["clone_dir"],
+                "changed": applied["changed"],
+                "tests_skipped": True,
+            })
         if delete_env:
             # The delivery is verified at this point (the branch exists), so
             # the sandbox is a redundant copy and releasing it early is safe
@@ -573,7 +596,8 @@ class TaskRunner:
 
     def continue_task(self, *, task_id: str,
                       budget: int | None = None,
-                      memory_save: bool = False) -> dict:
+                      memory_save: bool = False,
+                      execute_tests: bool = False) -> dict:
         record = self.store.get(task_id)
         if record.get("status") != "incomplete":
             raise ValueError(

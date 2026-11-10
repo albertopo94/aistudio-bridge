@@ -109,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="let the worker write durable findings to Engram memory "
              "(off by default: reads only)",
     )
+    run.add_argument(
+        "--run-tests", action="store_true",
+        help="run the delivered project's tests locally after the delivery "
+             "(off by default: the code was written by a remote agent, and "
+             "running it on your machine executes it)",
+    )
 
     status = sub.add_parser("status", help="show one task or all of them")
     status.add_argument("task_id", nargs="?")
@@ -123,6 +129,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--memory-save", action="store_true",
         help="let the worker write durable findings to Engram memory "
              "(off by default: reads only)",
+    )
+    cont.add_argument(
+        "--run-tests", action="store_true",
+        help="run the delivered project's tests locally after the delivery "
+             "(off by default)",
     )
 
     cancel = sub.add_parser("cancel", help="stop tracking a task")
@@ -301,6 +312,7 @@ def main(argv=None, *, runner=None) -> int:
                 gcs_source=args.gcs_source,
                 gcs_token_file=args.gcs_token_file,
                 memory_save=getattr(args, "memory_save", False),
+                execute_tests=getattr(args, "run_tests", False),
             )
             code = _report_run(result)
             environment_id = result.get("environment_id")
@@ -350,6 +362,7 @@ def main(argv=None, *, runner=None) -> int:
             return _report_run(runner.continue_task(
                 task_id=args.task_id, budget=args.budget,
                 memory_save=getattr(args, "memory_save", False),
+                execute_tests=getattr(args, "run_tests", False),
             ))
         if args.command == "setup":
             from .config import load_config, save_config
@@ -578,6 +591,8 @@ def _report_run(result: dict) -> int:
     if tests_rc is not None:
         verdict = "pass" if tests_rc == 0 else f"FAIL (rc {tests_rc})"
         print(f"tests:  {verdict}")
+    elif result.get("tests_skipped"):
+        print("tests:  not run (pass --run-tests to execute them locally)")
     print("nothing was pushed; merge the branch when you are ready.")
     return 0 if tests_rc in (None, 0) else 1
 
