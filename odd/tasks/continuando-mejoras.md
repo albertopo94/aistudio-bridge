@@ -131,3 +131,24 @@ Tarea). Riesgo: item 4 (concurrencia).
 L5 (2026-11-10): boundary de slice: la rama acumula ~1.4k líneas desde main
 (8 commits, T1–T5). Entrega: rama local feature; push/PR sigue siendo decisión
 del usuario (decisión del cierre anterior). Quedan T6–T8.
+
+L6 (2026-11-10): cierre de sesión. El usuario pidió cerrar y reiniciar: rama
+`feat/continuando-mejoras` mergueada a `main` (fast-forward cc5789c→d594056,
+v0.26.0) y pusheada a GitHub. Working tree limpio.
+
+PENDIENTE PARA LA SIGUIENTE SESIÓN (en este orden recomendado):
+- T6 · P1-2 — retorno incremental de workspaces grandes. Integrar un retorno
+  por archivos (tipo `fetch --path`) cuando el TAR completo no sea viable
+  (límites medidos: 1 GiB ok, 2 GiB rechazado ~122 s).
+- T7 · D-1 — idempotencia de llamadas a funciones locales (p. ej.
+  `memory_save`): una llamada puede persistir antes de que el resultado llegue
+  a Google; si el proceso muere en esa ventana, al continuar se ejecutaría
+  otra vez. Sin garantía de exactly-once hoy.
+- T8 · D-2 — reconciliar interacciones ya completadas en `continue_task()`:
+  hoy, si la interacción ya terminó, se crea otra interacción nueva con
+  `continue`; debe recuperar el resultado y entregarlo (`_deliver()`) en vez
+de re-pagar.
+- Follow-up P0-1 (L2): reportar `base_moved` en el CLI/status (hoy solo queda
+  en el resultado y el store).
+- La rama feature quedó en main; el branch local `feat/continuando-mejoras`
+  se mantiene (igual que `feat/hardening`), no se borró.
