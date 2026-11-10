@@ -5,7 +5,9 @@ run downloaded the agent's workspace and immediately ran its tests through
 ``subprocess`` with the user's whole environment inherited -- a directory
 name does not make a sandbox, so a test the agent wrote could read
 credentials, SSH keys or anything else the account can reach. The product
-treats delivered bytes as untrusted everywhere else; this closes the gap.
+treats delivered bytes as untrusted everywhere else; this narrows the gap.
+The reduction is not a full sandbox -- the tests still run as the user and
+have network access -- so it must not be described as one (P0-3).
 
 Rules under test:
 
@@ -14,9 +16,12 @@ Rules under test:
    green suite).
 2. ``--run-tests`` is the explicit opt-in and then the project's test command
    runs exactly once, in the throwaway copy.
-3. On the opt-in path the child environment is scrubbed: the user's own
-   secrets (API keys, tokens, SSH agent, arbitrary exported variables) never
-   reach the process; only a minimal allowlist plus a non-user HOME.
+3. On the opt-in path the child environment is scrubbed: the user's exported
+   secrets (API keys, tokens, SSH agent, arbitrary exported variables) are not
+   passed to the process; only a minimal allowlist plus a non-user HOME. This
+   is a reduction, not a sandbox: the child runs as the same user and is
+   given no network restriction -- see
+   ``test_env`` for the boundary that is and is not drawn.
 4. ``run_tests`` defaults to the scrubbed environment for any caller, so no
    future caller can accidentally inherit ``os.environ`` again.
 """
@@ -149,6 +154,19 @@ class ScrubbedEnvironmentTest(unittest.TestCase):
     def test_an_explicit_env_is_honoured(self):
         env = self._observed_env(env={"ONLY_THIS": "1"})
         self.assertEqual(env, {"ONLY_THIS": "1"})
+
+
+class TestEnvDocumentationTest(unittest.TestCase):
+    """P0-3: the docs must not describe the reduced env as a secret-free
+    sandbox -- the child runs as the same user, with network access."""
+
+    def test_test_env_docstring_names_the_boundary(self):
+        import inspect
+        doc = inspect.getdoc(sync.test_env)
+        self.assertIsNotNone(doc)
+        self.assertIn("not a sandbox", doc)
+        self.assertIn("network restriction", doc)
+        self.assertIn("same macOS user", doc)
 
 
 if __name__ == "__main__":

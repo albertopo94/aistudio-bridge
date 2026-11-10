@@ -377,11 +377,14 @@ TEST_ENV_ALLOWLIST = frozenset({
 
 
 def test_env(home: str) -> dict[str, str]:
-    """The scrubbed environment a delivered project's tests run in.
+    """The reduced environment a delivered project's tests run in.
 
     Allowlist, never a blocklist: a variable nobody thought of cannot leak.
-    ``HOME`` is replaced with the scratch directory so ``~/.ssh``,
-    ``~/.aws`` or a dotfile with a token is out of reach.
+    ``HOME`` is pointed at the scratch directory so the common dotfile paths
+    (``~/.ssh``, ``~/.aws``, a dotfile holding a token) are not named by the
+    default ``HOME``. This is a reduction, **not a sandbox**: the child runs
+    as the same macOS user, can read any file by absolute path, and is given
+    no network restriction.
     """
     env = {
         name: os.environ[name]
@@ -403,8 +406,9 @@ def run_tests(workdir: str, command: list[str],
     Returns ``(returncode, combined_output)``. A non-zero status is a result,
     not an exception: the caller reports it.
 
-    The child gets a scrubbed environment by default (hardening S1); pass
-    ``env`` only for a caller that means to hand it specific variables.
+    The child gets the reduced environment by default (hardening S1; see
+    :func:`test_env` for what it does and does not isolate); pass ``env``
+    only for a caller that means to hand it specific variables.
     """
     child_env = test_env(os.path.abspath(workdir)) if env is None else env
     try:

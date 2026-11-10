@@ -442,8 +442,10 @@ the sandbox pushing the result to your git host
 and applies it to a fresh clone on a new branch, as one commit, before you look
 at it. Its tests are not run unless you pass `--run-tests`, because running
 them is running remote-written code on your machine; when you do pass it, the
-test process gets a scrubbed environment (no API keys, no SSH agent, a scratch
-`HOME`). That download has its own outcome: if it fails (a workspace above the
+test process runs in a reduced environment -- an allowlist of variables, no
+SSH agent, and ``HOME`` pointed at the scratch copy. That reduction is not a
+sandbox: the tests still run as your user, can read any file by absolute
+path, and are given no network restriction. That download has its own outcome: if it fails (a workspace above the
 tar's ~1 GiB ceiling answers 500/504), the task records `undelivered` — not
 `completed` — says the service's error, prints the `fetch` commands that reach
 the bytes file by file, and keeps the sandbox out of `clean --yes` until the
@@ -603,9 +605,11 @@ one reason it is not the engine behind `ask`.
   input is refused. Nothing else reaches your filesystem beyond the repository,
   and nothing deletes memory.
 - The delivered tree is never executed on your machine unless you pass
-  `--run-tests`. When you do, the test child gets an allowlisted environment
-  (PATH, locale, TMPDIR) with `HOME` pointed at the scratch copy, so API keys,
-  cloud credentials and the SSH agent are not inherited.
+  `--run-tests`. When you do, the test child runs in a reduced environment
+  (PATH, locale, TMPDIR) with `HOME` pointed at the scratch copy. This removes
+exported credentials from the environment, but it is not a sandbox: the tests
+still run as your user, can read any file by absolute path, and are given no
+network restriction.
 - Task ids carry a random suffix, so two launches in the same second stay two
   tasks; a write that would fuse two different tasks is refused instead of
   overwriting a paid-for record.
