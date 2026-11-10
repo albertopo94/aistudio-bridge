@@ -1082,9 +1082,11 @@ class TaskRunner:
         )
 
         if stream:
+            # Hardening S8: send the same input the non-stream branch sends
+            # (text plus any images) so --stream --image does not drop them.
             interaction = self.client.stream_interaction(
                 agent=AGENT,
-                input=task,
+                input=task_parts(task, images),
                 environment="remote",
                 agent_config=config,
                 system_instruction=contract,
@@ -1145,4 +1147,5 @@ class TaskRunner:
         return {
             "task_id": task_id, "status": status, "tokens": tokens,
             "budget": config["max_total_tokens"], "text": text,
+            "streamed": stream,
         }

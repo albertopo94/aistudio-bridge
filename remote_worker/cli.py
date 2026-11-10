@@ -618,8 +618,11 @@ def _report_ask(result: dict) -> int:
     if status != "completed":
         print(result.get("text") or result.get("report") or "")
         return 3
-    print()
-    print(result.get("text", ""))
+    if not result.get("streamed"):
+        # Hardening S8: --stream already printed the deltas; a second print
+        # of the completed text would double the answer in the terminal.
+        print()
+        print(result.get("text", ""))
     return 0
 
 

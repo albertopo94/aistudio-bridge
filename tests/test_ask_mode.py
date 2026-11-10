@@ -9,6 +9,9 @@ Rules under test:
 5. ask records the task in the state store so it can be inspected.
 """
 
+import json
+import os
+import tempfile
 import unittest
 
 from tests.fake_interactions import FakeInteractionsServer
@@ -147,3 +150,74 @@ class TestAskMode(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class AskStreamSinglePrintTest(unittest.TestCase):
+    """Hardening S8: --stream shows the answer once, and keeps images."""
+
+    def _runner(self, srv, store=None):
+        from remote_worker.google_client import InteractionsClient
+        from remote_worker.state import TaskStore
+        return TaskRunner(
+            project="proj", api_key="AQ.k",
+            client=InteractionsClient(api_key="AQ.k", base_url=srv.base_url),
+            files=None, dispatcher=StubMemory(),
+            store=store or TaskStore(project="proj"), workdir="/tmp/w",
+        )
+
+    def _sse_answer(self, srv, interaction=None):
+        srv.sse_events = [
+            {"event_type": "step.delta",
+             "delta": {"type": "text", "text": "Hello "}},
+            {"event_type": "step.delta",
+             "delta": {"type": "text", "text": "world"}},
+            {"event_type": "interaction.completed",
+             "interaction": interaction or _completed([{
+                 "type": "model_output",
+                 "content": [{"text": "Hello world"}]}])},
+        ]
+
+    def test_stream_prints_the_answer_exactly_once(self):
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from remote_worker import cli
+        with FakeInteractionsServer() as srv:
+            self._sse_answer(srv)
+            runner = self._runner(srv)
+            out = StringIO()
+            with redirect_stdout(out):
+                code = cli.main(["ask", "x", "--stream"], runner=runner)
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue().count("Hello world"), 1,
+                         out.getvalue())
+
+    def test_non_stream_still_prints_exactly_once(self):
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from remote_worker import cli
+        with FakeInteractionsServer() as srv:
+            srv.reply_body = _completed([{
+                "type": "model_output", "content": [{"text": "Hello world"}]}])
+            runner = self._runner(srv)
+            out = StringIO()
+            with redirect_stdout(out):
+                code = cli.main(["ask", "x"], runner=runner)
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue().count("Hello world"), 1)
+
+    def test_stream_request_carries_the_image_part(self):
+        # Hardening S8: --stream sent the bare string while the non-stream
+        # branch sent task_parts(task, images), so an image was dropped
+        # without a word.
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
+            fh.write(b"\x89PNG\r\n\x1a\n" + b"\0" * 20)
+            png = fh.name
+        self.addCleanup(lambda: os.path.exists(png) and os.unlink(png))
+        with FakeInteractionsServer() as srv:
+            self._sse_answer(srv)
+            runner = self._runner(srv)
+            runner.ask("x", stream=True, images=[png])
+        posts = [r for r in srv.requests if r["method"] == "POST"]
+        body = json.loads(posts[0]["body"])
+        self.assertIsInstance(body["input"], list, body["input"])
+        kinds = [part.get("type") for part in body["input"]]
+        self.assertEqual(kinds, ["text", "image"], body["input"])
