@@ -104,6 +104,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--image", action="append", default=None, metavar="PATH",
                      help="send an image with the task (repeatable): png, "
                           "jpeg, gif or webp")
+    run.add_argument(
+        "--memory-save", action="store_true",
+        help="let the worker write durable findings to Engram memory "
+             "(off by default: reads only)",
+    )
 
     status = sub.add_parser("status", help="show one task or all of them")
     status.add_argument("task_id", nargs="?")
@@ -114,6 +119,11 @@ def build_parser() -> argparse.ArgumentParser:
     cont = sub.add_parser("continue", help="resume a task that hit its budget")
     cont.add_argument("task_id")
     cont.add_argument("--budget", type=int, default=None)
+    cont.add_argument(
+        "--memory-save", action="store_true",
+        help="let the worker write durable findings to Engram memory "
+             "(off by default: reads only)",
+    )
 
     cancel = sub.add_parser("cancel", help="stop tracking a task")
     cancel.add_argument("task_id")
@@ -159,6 +169,11 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--budget", type=int, default=None)
     ask.add_argument("--stream", action="store_true",
                      help="stream the worker's progress live")
+    ask.add_argument(
+        "--memory-save", action="store_true",
+        help="let the worker write durable findings to Engram memory "
+             "(off by default: reads only)",
+    )
     ask.add_argument("--background", action="store_true",
                      help="run the task on the service and poll for it, so a "
                           "dropped connection does not lose the result")
@@ -233,6 +248,7 @@ def main(argv=None, *, runner=None) -> int:
                 stream=getattr(args, "stream", False),
                 background=args.background,
                 images=images,
+                memory_save=getattr(args, "memory_save", False),
             ))
         if args.command == "run":
             from .config import load_config
@@ -284,6 +300,7 @@ def main(argv=None, *, runner=None) -> int:
                 delete_env=args.delete_env,
                 gcs_source=args.gcs_source,
                 gcs_token_file=args.gcs_token_file,
+                memory_save=getattr(args, "memory_save", False),
             )
             code = _report_run(result)
             environment_id = result.get("environment_id")
@@ -332,6 +349,7 @@ def main(argv=None, *, runner=None) -> int:
                 _check_model(parser, planner.DEFAULT_MODEL, args.budget)
             return _report_run(runner.continue_task(
                 task_id=args.task_id, budget=args.budget,
+                memory_save=getattr(args, "memory_save", False),
             ))
         if args.command == "setup":
             from .config import load_config, save_config

@@ -8,6 +8,9 @@ Rules under test (from plan WU-2 and the PoC findings):
 3. Only an allowlisted subset of memory tools is dispatchable; admin tools
    (delete, prune) are unreachable from the worker.
 4. CLI failures surface as an error carrying the real stderr, not silence.
+5. (hardening S6/S10) Writes are off by default: `memory_save` is neither
+   advertised nor dispatchable without the user's opt-in, and an accepted
+   write is bounded in size.
 """
 
 import json
@@ -15,6 +18,8 @@ import unittest
 
 try:
     from remote_worker.engram_adapter import (
+        SAVE_CONTENT_LIMIT,
+        SAVE_TITLE_LIMIT,
         EngramError,
         EngramMemory,
         MemoryDispatcher,
@@ -122,11 +127,15 @@ class TestMemoryDispatcher(unittest.TestCase):
         with self.assertRaises(UnknownToolError):
             self.dispatcher.dispatch(call)
 
-    # Rule 3b: the exposed tool specs match the allowlist exactly.
+    # Rule 3b: the exposed tool specs match the allowlist exactly. Hardening
+    # S6 narrowed the default to the read-only half; the write is opt-in.
     def test_tool_specs_match_allowlist(self):
         names = {spec["name"] for spec in self.dispatcher.tool_specs()}
+        self.assertEqual(names, {"memory_search", "memory_context"})
+        opted_in = MemoryDispatcher(self.memory, allow_save=True)
         self.assertEqual(
-            names, {"memory_search", "memory_save", "memory_context"}
+            {spec["name"] for spec in opted_in.tool_specs()},
+            {"memory_search", "memory_save", "memory_context"},
         )
 
 
@@ -154,3 +163,79 @@ class TestMemoryFailureReporting(unittest.TestCase):
         payload = json.loads(result)
         self.assertFalse(payload["ok"])
         self.assertIn("unknown project", payload["error"])
+
+
+class MemoryWritePolicyTest(unittest.TestCase):
+    """Hardening S6 + S10: the worker reads memory; writing is opt-in.
+
+    A prompted agent controls what lands in the user's durable store when
+    `memory_save` is advertised: a wrong "decision" it invented, or text
+    lifted from a poisoned repository, would outlive the task and steer
+    later ones. So the default exposes search and context only, a write
+    needs the user's `--memory-save`, and every accepted write is bounded.
+    """
+
+    def setUp(self):
+        self.runner = SpyRunner()
+        self.memory = EngramMemory(project="aistudio-bridge",
+                                   runner=self.runner)
+
+    def _call(self, arguments):
+        return {"type": "function_call", "name": "memory_save",
+                "id": "call_1", "arguments": arguments}
+
+    def test_save_is_not_advertised_by_default(self):
+        dispatcher = MemoryDispatcher(self.memory)
+        names = {spec["name"] for spec in dispatcher.tool_specs()}
+        self.assertEqual(names, {"memory_search", "memory_context"})
+
+    def test_a_write_without_the_opt_in_is_refused_and_saves_nothing(self):
+        dispatcher = MemoryDispatcher(self.memory)
+        parsed = json.loads(dispatcher.dispatch(
+            self._call({"title": "t", "content": "c"})))
+        self.assertFalse(parsed["ok"])
+        self.assertIn("--memory-save", parsed["error"])
+        self.assertEqual(self.runner.calls, [])
+
+    def test_the_opt_in_advertises_and_performs_the_write(self):
+        dispatcher = MemoryDispatcher(self.memory, allow_save=True)
+        names = {spec["name"] for spec in dispatcher.tool_specs()}
+        self.assertIn("memory_save", names)
+        parsed = json.loads(dispatcher.dispatch(
+            self._call({"title": "t", "content": "c",
+                        "type": "decision"})))
+        self.assertTrue(parsed["ok"])
+        self.assertEqual(self.runner.calls[0][0], "save")
+
+    def test_oversized_content_is_refused_without_touching_the_store(self):
+        dispatcher = MemoryDispatcher(self.memory, allow_save=True)
+        parsed = json.loads(dispatcher.dispatch(
+            self._call({"title": "t",
+                        "content": "x" * (SAVE_CONTENT_LIMIT + 1)})))
+        self.assertFalse(parsed["ok"])
+        self.assertIn("content", parsed["error"])
+        self.assertEqual(self.runner.calls, [])
+
+    def test_oversized_title_is_refused(self):
+        dispatcher = MemoryDispatcher(self.memory, allow_save=True)
+        parsed = json.loads(dispatcher.dispatch(
+            self._call({"title": "t" * (SAVE_TITLE_LIMIT + 1),
+                        "content": "c"})))
+        self.assertFalse(parsed["ok"])
+        self.assertIn("title", parsed["error"])
+        self.assertEqual(self.runner.calls, [])
+
+    def test_blank_fields_are_refused(self):
+        dispatcher = MemoryDispatcher(self.memory, allow_save=True)
+        parsed = json.loads(dispatcher.dispatch(
+            self._call({"title": "   ", "content": "c"})))
+        self.assertFalse(parsed["ok"])
+        self.assertEqual(self.runner.calls, [])
+
+    def test_a_boundary_write_is_accepted(self):
+        dispatcher = MemoryDispatcher(self.memory, allow_save=True)
+        parsed = json.loads(dispatcher.dispatch(
+            self._call({"title": "t" * SAVE_TITLE_LIMIT,
+                        "content": "x" * SAVE_CONTENT_LIMIT})))
+        self.assertTrue(parsed["ok"])
+        self.assertEqual(len(self.runner.calls), 1)

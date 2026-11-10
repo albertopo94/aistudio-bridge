@@ -273,8 +273,11 @@ class TaskRunner:
             local_repo: str | None = None,
             delete_env: bool = False,
             gcs_source: str | None = None,
-            gcs_token_file: str | None = None) -> dict:
+            gcs_token_file: str | None = None,
+            memory_save: bool = False) -> dict:
         config = agent_config(model=model, budget=budget)
+        if self.memory_enabled:
+            self.dispatcher.allow_save = memory_save
         if gcs_source is not None and local_repo is not None:
             raise ValueError("pass either --gcs-source or --local-repo, not both")
         if gcs_source is not None and repo_url is not None:
@@ -569,7 +572,8 @@ class TaskRunner:
         return tests_clone
 
     def continue_task(self, *, task_id: str,
-                      budget: int | None = None) -> dict:
+                      budget: int | None = None,
+                      memory_save: bool = False) -> dict:
         record = self.store.get(task_id)
         if record.get("status") != "incomplete":
             raise ValueError(
@@ -577,6 +581,8 @@ class TaskRunner:
                 "only an incomplete task can continue"
             )
         config = agent_config(model=record.get("model"), budget=budget)
+        if self.memory_enabled:
+            self.dispatcher.allow_save = memory_save
         # G13: do not race a running interaction. Chaining to an interaction
         # the service still reports as running is a documented 400, and a
         # retry of it would fork a second branch of the conversation. Ask
@@ -960,7 +966,7 @@ class TaskRunner:
     def ask(self, task: str, *, model: str | None = None,
             budget: int | None = None, project: str | None = None,
             stream: bool = False, background: bool = False,
-            images=None) -> dict:
+            images=None, memory_save: bool = False) -> dict:
         """Delegate a NON-code task and return the worker's text.
 
         Unlike :meth:`run`, ask does NOT mount a repository and does NOT
@@ -972,6 +978,8 @@ class TaskRunner:
         """
         config = agent_config(model=model, budget=budget)
         proj = project or self.project
+        if self.memory_enabled:
+            self.dispatcher.allow_save = memory_save
         task_id = f"t_{int(time.time())}"
 
         tools = [{"type": "code_execution"}, {"type": "google_search"},

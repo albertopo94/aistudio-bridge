@@ -18,13 +18,28 @@ Two rules are enforced here and nowhere else:
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 
 DEFAULT_BINARY = "engram"
 
-#: The only memory operations a remote worker may request. Admin operations
-#: (delete, prune, merge) are deliberately absent.
+#: The only memory operations a remote worker may ever request. Admin
+#: operations (delete, prune, merge) are deliberately absent.
 ALLOWED_TOOLS = frozenset({"memory_search", "memory_save", "memory_context"})
+
+#: The half of that allowlist a worker gets without the user saying anything.
+#: Hardening S6: a prompted agent decides what `memory_save` would write, and
+#: that text outlives the task in the user's durable store (and steers later
+#: sessions), so writing is opt-in through `--memory-save`.
+READ_ONLY_TOOLS = frozenset({"memory_search", "memory_context"})
+WRITE_TOOLS = frozenset({"memory_save"})
+
+#: Bounds for an accepted write (hardening S10). Generous for a real
+#: decision, small enough that a poisoned turn cannot fill the store.
+SAVE_TITLE_LIMIT = 200
+SAVE_CONTENT_LIMIT = 8000
+#: The category travels as a CLI flag, so it stays a plain word.
+SAVE_TYPE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 
 
 class EngramError(RuntimeError):
@@ -92,14 +107,20 @@ class EngramMemory:
 
 
 class MemoryDispatcher:
-    """Translates a worker's ``function_call`` into a local memory answer."""
+    """Translates a worker's ``function_call`` into a local memory answer.
 
-    def __init__(self, memory: EngramMemory):
+    Reads are always available; writes need ``allow_save`` (the CLI's
+    ``--memory-save``), and the tool is not even advertised without it, so a
+    worker cannot be talked into a write the user never asked for.
+    """
+
+    def __init__(self, memory: EngramMemory, allow_save: bool = False):
         self._memory = memory
+        self.allow_save = allow_save
 
     def tool_specs(self) -> list[dict]:
         """Declarations to pass as the ``tools`` entry of an interaction."""
-        return [
+        specs = [
             {
                 "type": "function",
                 "name": "memory_search",
@@ -125,10 +146,23 @@ class MemoryDispatcher:
             },
             {
                 "type": "function",
+                "name": "memory_context",
+                "description": (
+                    "Load recent context from previous sessions for the "
+                    "current project."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        ]
+        if self.allow_save:
+            specs.append({
+                "type": "function",
                 "name": "memory_save",
                 "description": (
                     "Save a durable decision, discovery or constraint to the "
-                    "user's project memory. Do not save conversation turns."
+                    "user's project memory. Do not save conversation turns. "
+                    f"Title up to {SAVE_TITLE_LIMIT} characters, content up "
+                    f"to {SAVE_CONTENT_LIMIT}."
                 ),
                 "parameters": {
                     "type": "object",
@@ -144,17 +178,33 @@ class MemoryDispatcher:
                     },
                     "required": ["title", "content"],
                 },
-            },
-            {
-                "type": "function",
-                "name": "memory_context",
-                "description": (
-                    "Load recent context from previous sessions for the "
-                    "current project."
-                ),
-                "parameters": {"type": "object", "properties": {}},
-            },
-        ]
+            })
+        return specs
+
+    def _check_write(self, arguments: dict) -> None:
+        """Gate an opt-in write: the policy plus S10's validation (S10)."""
+        title = arguments.get("title") or ""
+        content = arguments.get("content") or ""
+        if not title.strip():
+            raise ValueError("memory_save: title is required")
+        if not content.strip():
+            raise ValueError("memory_save: content is required")
+        if len(title) > SAVE_TITLE_LIMIT:
+            raise ValueError(
+                f"memory_save: title is {len(title)} characters; the limit "
+                f"is {SAVE_TITLE_LIMIT}"
+            )
+        if len(content) > SAVE_CONTENT_LIMIT:
+            raise ValueError(
+                f"memory_save: content is {len(content)} characters; the "
+                f"limit is {SAVE_CONTENT_LIMIT}"
+            )
+        write_type = arguments.get("type") or "discovery"
+        if not SAVE_TYPE_PATTERN.match(str(write_type)):
+            raise ValueError(
+                "memory_save: type must be a short word of letters, digits, "
+                "hyphens or underscores (e.g. decision, discovery, bugfix)"
+            )
 
     def dispatch(self, call: dict) -> str:
         """Execute one ``function_call`` and return a JSON **string**."""
@@ -169,17 +219,31 @@ class MemoryDispatcher:
         # The orchestrator owns the project: ignore anything the worker sent.
         arguments.pop("project", None)
 
+        # Hardening S6: writing needs the user's explicit opt-in, and the
+        # answer goes back to the worker as an error it can report, not an
+        # exception that would abort the turn.
+        if name in WRITE_TOOLS and not self.allow_save:
+            return json.dumps({
+                "ok": False,
+                "tool": name,
+                "error": (
+                    "the user did not enable memory writes for this task; "
+                    "use --memory-save to allow them"
+                ),
+            })
+
         try:
-            if name == "memory_search":
-                content = self._memory.search(
-                    arguments.get("query", ""),
-                    limit=int(arguments.get("limit", 5)),
-                )
-            elif name == "memory_save":
+            if name == "memory_save":
+                self._check_write(arguments)
                 content = self._memory.save(
                     arguments.get("title", ""),
                     arguments.get("content", ""),
-                    type=arguments.get("type", "discovery"),
+                    type=arguments.get("type") or "discovery",
+                )
+            elif name == "memory_search":
+                content = self._memory.search(
+                    arguments.get("query", ""),
+                    limit=int(arguments.get("limit", 5)),
                 )
             else:  # memory_context
                 content = self._memory.context(arguments.get("scope"))
@@ -187,6 +251,14 @@ class MemoryDispatcher:
             # A broken or unknown local store must inform the worker, not
             # abort the task: the worker can report "memory unavailable" and
             # keep working with what it has.
+            return json.dumps({
+                "ok": False,
+                "tool": name,
+                "error": str(exc),
+            })
+        except ValueError as exc:
+            # A write the policy refuses is reported to the worker the same
+            # way a store failure is: it keeps the task moving.
             return json.dumps({
                 "ok": False,
                 "tool": name,
