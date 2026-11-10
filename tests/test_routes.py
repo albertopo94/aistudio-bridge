@@ -201,10 +201,10 @@ class RouteTableTest(unittest.TestCase):
         # proof stays out of the alternatives an error message offers.
         self.assertEqual(by_id["shards"].status, routes.STATUS_PROVEN_POC)
         self.assertIn("poc/t24_shards.py", by_id["shards"].needs)
-        # GCS is now a BUILT route, but nothing has run it live (it needs
-        # the user's bucket), so it must not be advertised as available:
-        # S11 keeps it unvalidated and out of the alternatives line.
-        self.assertEqual(by_id["gcs-source"].status, routes.STATUS_UNVALIDATED)
+        # GCS is DISABLED (P1-1): a gcs tree is not a git repository, so a
+        # completed run could not come back to a local branch. It must say so
+        # and stay out of the alternatives line until the return path lands.
+        self.assertEqual(by_id["gcs-source"].status, routes.STATUS_DISABLED)
         self.assertEqual(by_id["gcs-source"].how,
                          "--gcs-source gs://bucket/prefix")
 

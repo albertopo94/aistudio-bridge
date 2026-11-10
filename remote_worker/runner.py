@@ -401,6 +401,19 @@ class TaskRunner:
         config = agent_config(model=model, budget=budget)
         if self.memory_enabled:
             self.dispatcher.allow_save = memory_save
+        if gcs_source is not None:
+            # P1-1: the gcs source route is disabled until it has a working
+            # git return path. A gcs tree is not a git repository, so a
+            # completed run would call apply_to_branch() with repo_url
+            # "gs://..." and fail a git clone, leaving the task undelivered
+            # with no honest return. Refuse up front with a clear message
+            # instead of offering a route that cannot come back.
+            raise ValueError(
+                "--gcs-source is disabled: a Cloud Storage tree is not a git "
+                "repository, so this route has no working return path to a "
+                "local branch yet. Use --repo or --local-repo, or re-enable "
+                "GCS once the git return path is built."
+            )
         if gcs_source is not None and local_repo is not None:
             raise ValueError("pass either --gcs-source or --local-repo, not both")
         if gcs_source is not None and repo_url is not None:

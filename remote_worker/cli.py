@@ -53,10 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     source.add_argument(
         "--gcs-source", metavar="gs://BUCKET/PREFIX",
-        help="mount a Cloud Storage bucket as the sandbox's repository: the "
-             "service COPIES the tree out of your bucket at mount time (up to "
-             "2 GB per source, documented), so no bytes leave your machine "
-             "over the upload path",
+        help="(disabled) mount a Cloud Storage bucket as the sandbox's "
+             "repository; rejected at launch until the git return path is "
+             "built, because a gcs tree is not a git repository and a "
+             "completed run could not come back to a local branch",
     )
     run.add_argument(
         "--gcs-token-file", default=None, metavar="PATH",

@@ -35,6 +35,9 @@ STATUS_WORKS = "works"
 #: The route is built but its limit was never observed against the real
 #: service, so it must not be advertised as available (S11).
 STATUS_UNVALIDATED = "not validated live"
+#: The route is turned off at launch until a missing piece lands; it is listed
+#: so a reader finds the reason instead of wondering why the flag does nothing.
+STATUS_DISABLED = "disabled (no git return path yet) — a gcs tree is not a git repository"
 #: The technique was observed working against the real service, in a PoC and
 #: not in a command: a fact to weigh when choosing a route, never an
 #: alternative an error message can offer.
@@ -129,7 +132,7 @@ ROUTES = (
         ceiling="2 GB (documented), per source — the service copies the tree at mount",
         speed="the service pulls from your bucket: no bytes leave your machine over the fair-use upload path",
         needs="a GCP project and bucket; for a private bucket, gcloud auth login (or --gcs-token-file); the setup steps are in README",
-        status=STATUS_UNVALIDATED,
+        status=STATUS_DISABLED,
     ),
 )
 

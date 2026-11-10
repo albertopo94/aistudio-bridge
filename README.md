@@ -132,8 +132,7 @@ merges the result itself — review the branch, then merge it with your own git.
 | `run "<task>" --repo <url> --background` | Same, but the service runs it and we poll — a dropped connection cannot lose the result |
 | `run "<task>" --repo <url> --reuse-env <id>` | Run in a sandbox you already have, keeping the dependencies an earlier task installed |
 | `run "<task>" --local-repo <path>` | Upload a local working tree instead of cloning a URL (see routes below) |
-| `run "<task>" --gcs-source gs://bucket/prefix` | Pull the tree from your own Cloud Storage bucket (2 GB per source, see below) |
-| `run "<task>" --gcs-source gs://bucket/prefix --gcs-token-file ./token` | Same, but hand the bearer token explicitly instead of asking gcloud (never printed) |
+| `run "<task>" --gcs-source gs://bucket/prefix` | **Disabled** until it has a git return path: a bucket tree is not a git repository (see below) |
 | `run "<task>" --repo <url> --agents-file ./AGENTS.md` | Send your own AGENTS.md where the service reads it (`/.agents/AGENTS.md`) |
 | `run "<task>" --repo <url> --mount-file <local>:<target>` | Place a local text file inside the sandbox (repeatable) — skills, extra norms |
 | `run "<task>" --repo <url> --delete-env` | Delete the sandbox once the delivery is verified (`--local-repo` works too; a failed delivery always keeps it) |
@@ -296,27 +295,21 @@ window, not your repository — and which routes remain. The half-used sandbox
 from the failed attempt is released instead of sitting in your account for its
 7-day life.
 
-### A repository that lives in a bucket (GCS)
+### A repository that lives in a bucket (GCS) — disabled
 
-`--gcs-source gs://bucket/prefix` points the sandbox at a tree you keep in a
-Cloud Storage bucket. The sandbox does not clone and does not upload: the
-service COPIES the tree out of your bucket into the sandbox at mount time (it
-is not a live mount), capped at **2 GB per source** (documented). Because no
-bytes leave your machine over the upload path, this is the route that escapes
-the account's fair-use upload window entirely.
+`--gcs-source gs://bucket/prefix` is **disabled at launch** until it has a
+working git return path. A gcs tree is not a git repository: the sandbox would
+copy it out of your bucket at mount time (it is not a live mount, capped at
+2 GB per source), but a completed run could not come back to a local branch,
+because `apply_to_branch` clones a git URL and a `gs://` uri is not one — the
+task would end `undelivered`. `run --gcs-source` now refuses with that
+explanation. The route's entry shape (`mount_gcs`) and its intended token flow
+stay in the code so the route can be re-enabled once the return path is built.
 
 ```bash
+# rejected today, with a message naming the missing git return path
 remote-worker run "fix the flaky test" --gcs-source gs://my-bucket/my-project
 ```
-
-A private bucket is read through the sandbox's egress proxy, which injects
-your own OAuth bearer on the wire: the product fetches `gcloud auth print-
-access-token` at run start (the token never enters the sandbox and is never
-printed), or you can hand it a token explicitly with `--gcs-token-file PATH`.
-A **public** bucket works with no credential at all.
-
-The token is short-lived (~60 min), but the mount happens at run start, so a
-long `--background` run is not affected.
 
 #### Setup for GCP novices
 
@@ -363,13 +356,13 @@ the archive split into parts, reassembled in the sandbox
     ceiling: 2 GB (documented), per source — the service copies the tree at mount
     speed: the service pulls from your bucket: no bytes leave your machine over the fair-use upload path
     needs: a GCP project and bucket; for a private bucket, gcloud auth login (or --gcs-token-file); the setup steps are in README
-    status: not validated live
+    status: disabled (no git return path yet) — a gcs tree is not a git repository
 ```
 
 The last row is listed because it is a real option to weigh, not because
 this tool can prove it works yet: `shards` is proven live in the PoC
-(poc/t24_shards.py) and `gcs-source` is built but waits on your bucket to
-run live. Neither is offered as an alternative in an error message.
+(poc/t24_shards.py) and `gcs-source` is built but **disabled** until its
+return path lands. Neither is offered as an alternative in an error message.
 
 Since the window is only observable by attempting an upload, `remote-worker
 probe` attempts a small one: 1 MiB into a scratch sandbox, which it deletes on
