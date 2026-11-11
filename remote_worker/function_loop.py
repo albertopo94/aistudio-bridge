@@ -60,7 +60,8 @@ def run_until_complete(client, dispatcher, interaction: dict, *,
                        on_event=None,
                        on_round=None,
                        system_instruction=None,
-                       tools=None) -> dict:
+                       tools=None,
+                       call_cache=None) -> dict:
     """Answer local function calls until the interaction stops asking.
 
     Returns the final interaction (``completed``, ``incomplete`` or any
@@ -79,6 +80,14 @@ def run_until_complete(client, dispatcher, interaction: dict, *,
     can persist its id before the next round starts. A process killed between
     rounds then leaves a record naming the live conversation instead of a
     stale one (hardening S7).
+
+    ``call_cache`` (D-1) makes a local call execute at most once per
+    (interaction, call) across crashes: after the side effect the answer
+    is stored under the pending call's own id, and a resumed round that
+    re-reads the same interaction replays the stored answer instead of
+    re-running the call. The cache is consulted before dispatch and
+    written after it, so a call that raised is never cached and a fresh
+    retry re-executes it.
     """
     steps_taken = 0
 
@@ -95,7 +104,15 @@ def run_until_complete(client, dispatcher, interaction: dict, *,
 
         results = []
         for call in calls:
-            answer = dispatcher.dispatch(call)
+            answer = None
+            if call_cache is not None:
+                answer = call_cache.get(interaction.get("id"),
+                                        call.get("id"))
+            if answer is None:
+                answer = dispatcher.dispatch(call)
+                if call_cache is not None:
+                    call_cache.set(interaction.get("id"), call.get("id"),
+                                   answer)
             results.append({
                 "type": "function_result",
                 "name": call.get("name"),
@@ -126,7 +143,8 @@ def wait_until_done(client, dispatcher, interaction: dict, *,
                     system_instruction=None,
                     tools=None,
                     on_event=None,
-                    on_round=None) -> dict:
+                    on_round=None,
+                    call_cache=None) -> dict:
     """Follow a background interaction to a terminal status (G13).
 
     A background create returns while the work is still running, and the
@@ -155,5 +173,6 @@ def wait_until_done(client, dispatcher, interaction: dict, *,
                 client, dispatcher, interaction,
                 system_instruction=system_instruction, tools=tools,
                 on_event=on_event, on_round=on_round,
+                call_cache=call_cache,
             )
     return interaction

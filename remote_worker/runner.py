@@ -98,6 +98,46 @@ def _repo_name(url: str) -> str:
     return re.sub(r"\.git$", "", tail) or "repo"
 
 
+class _LocalCallCache:
+    """D-1: persist answered local calls so a resumed task never re-runs one.
+
+    The crash window: :func:`run_until_complete` dispatches a call (a side
+    effect like ``memory_save`` persists), THEN creates the interaction that
+    carries the result. A process killed between the two leaves the record
+    pointing at the ``requires_action`` interaction; ``continue_task`` re-reads
+    it, the same ``call_id`` is pending again, and the side effect ran twice.
+
+    The answer is stored in the task record under
+    ``local_calls`` -> ``<interaction_id>`` -> ``<call_id>`` right after the
+    side effect, keyed by the interaction and the call's own id (a call id is
+    only unique within its interaction). ``run_until_complete`` consults this
+    before dispatch and writes after it, so a call that raised is never cached
+    and a fresh retry re-executes it. A call replayed from the cache is a
+    return path, not a side effect.
+
+    The cache reads and writes through the same locked ``TaskStore.record`` as
+    everything else, so it is safe under concurrency and survives across
+    processes.
+    """
+
+    def __init__(self, store: TaskStore, task_id: str):
+        self._store = store
+        self._task_id = task_id
+
+    def get(self, interaction_id: str, call_id: str):
+        record = self._store.get(self._task_id)
+        return (record.get("local_calls") or {}).get(interaction_id, {}).get(
+            call_id)
+
+    def set(self, interaction_id: str, call_id: str, answer: str) -> None:
+        record = self._store.get(self._task_id)
+        local = record.get("local_calls") or {}
+        local.setdefault(interaction_id, {})[call_id] = answer
+        self._store.record({
+            "task_id": self._task_id, "local_calls": local
+        })
+
+
 def _gcs_name(uri: str) -> str:
     """The target name for a gcs source: the last non-empty path segment.
 
@@ -600,7 +640,9 @@ class TaskRunner:
 
         final = run_until_complete(self.client, dispatcher, interaction,
                                    system_instruction=contract, tools=tools,
-                                   on_round=self._round_persister(task_id))
+                                   on_round=self._round_persister(task_id),
+                                   call_cache=_LocalCallCache(self.store,
+                                                              task_id))
         if background:
             try:
                 final = wait_until_done(
@@ -609,6 +651,7 @@ class TaskRunner:
                     max_polls=self.max_polls,
                     system_instruction=contract, tools=tools,
                     on_round=self._round_persister(task_id),
+                    call_cache=_LocalCallCache(self.store, task_id),
                 )
             except WatchLimitExceeded as exc:
                 # The watch ended, not the task: the interaction may still
@@ -1272,7 +1315,9 @@ class TaskRunner:
 
         final = run_until_complete(self.client, dispatcher, interaction,
                                    system_instruction=contract, tools=tools,
-                                   on_round=self._round_persister(task_id))
+                                   on_round=self._round_persister(task_id),
+                                   call_cache=_LocalCallCache(self.store,
+                                                              task_id))
         if background:
             try:
                 final = wait_until_done(
@@ -1281,6 +1326,7 @@ class TaskRunner:
                     max_polls=self.max_polls,
                     system_instruction=contract, tools=tools,
                     on_round=self._round_persister(task_id),
+                    call_cache=_LocalCallCache(self.store, task_id),
                 )
             except WatchLimitExceeded as exc:
                 report = (f"still running when our watch ended ({exc}); the "

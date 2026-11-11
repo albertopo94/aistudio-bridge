@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.29.0] — 2026-11-11
+
+### Added
+
+- A local function call (for example `memory_save`) now executes at most
+  once per (interaction, call) across crashes: the answer is persisted in
+  the task record right after the side effect, and a `continue` that
+  re-reads the same interaction replays the stored answer instead of
+  re-running the call (D-1). A call that failed is never cached, so a
+  fresh retry re-executes it.
+
 ## [0.28.0] — 2026-11-11
 
 ### Added

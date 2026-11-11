@@ -89,7 +89,7 @@ historial de cambios sincronizado con las versiones publicadas.
 | T4 | P1-1 | completar o desactivar la ruta GCS | 9c895ca |
 | T5 | P0-2 | aislar tareas concurrentes | 94e950e |
 | T6 | P1-2 | retorno incremental de workspaces grandes | 5ee30dd |
-| T7 | D-1 | idempotencia de llamadas a funciones | — |
+| T7 | D-1 | idempotencia de llamadas a funciones | 6499fae |
 | T8 | D-2 | reconciliación de interacciones completadas | — |
 
 ## Log
@@ -180,13 +180,27 @@ servicio vivo).
 
 Restante: T7 (D-1), T8 (D-2).
 
+L9 (2026-11-11, sesión 2): T7 cerrado en 6499fae (feat(loop)), v0.29.0.
+Test-first: tests/test_idempotent_calls.py (4 reglas, RED observado).
+Implementa D-1: cada llamada local resuelta se persiste en el registro de
+tarea bajo `local_calls` -> `<interaction_id>` -> `<call_id>` inmediatamente
+despues del efecto secundario, y el loop (`run_until_complete` /
+`wait_until_done`) la consufta antes de despachar y la escribe despues: si
+el proceso muere en la ventana entre el efecto y la ronda que lo reporta a
+Google, un `continue` que re-lee la misma interaccion replay la respuesta
+guardada en vez de re-ejecutar la llamada (exactly-once por interaccion/
+llamada). Una llamada que lanza no se cachea: un reintento fresco la
+re-ejecuta. Key por (interaction_id, call_id): el mismo call_id en OTRA
+interaccion es una llamada nueva y se ejecuta. `call_cache` es un parametro
+opcional (default None -> comportamiento previo intacto, regla 4). Backed
+por TaskStore.record bajo lock (P0-2). Suite 326 OK. Riesgo: item 6 (no hay
+test de red real; idempotencia probada contra fakes del cliente y del store).
+
 PENDIENTE PARA LA SIGUIENTE SESIÓN (en este orden recomendado):
 - [x] T6 · P1-2 — retorno incremental de workspaces grandes: cerrado en
   5ee30dd (L8).
-- T7 · D-1 — idempotencia de llamadas a funciones locales (p. ej.
-  `memory_save`): una llamada puede persistir antes de que el resultado llegue
-  a Google; si el proceso muere en esa ventana, al continuar se ejecutaría
-  otra vez. Sin garantía de exactly-once hoy.
+- [x] T7 · D-1 — idempotencia de llamadas a funciones locales: cerrado en
+  6499fae (L9).
 - T8 · D-2 — reconciliar interacciones ya completadas en `continue_task()`:
   hoy, si la interacción ya terminó, se crea otra interacción nueva con
   `continue`; debe recuperar el resultado y entregarlo (`_deliver()`) en vez
