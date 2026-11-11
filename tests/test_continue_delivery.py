@@ -82,10 +82,13 @@ class ContinueDeliversTest(unittest.TestCase):
         })
 
     def _serve(self, srv, *, final_status="completed", tar=True,
-               tar_status=200):
+               tar_status=200, precheck="incomplete"):
         # The G13 pre-check reads the running interaction; then the
-        # continuation POST; then the workspace download GET.
-        srv.get_replies = [(200, json.dumps({"status": "completed"}).encode())]
+        # continuation POST; then the workspace download GET. For the
+        # fresh-continue tests the interaction is a budget stop (incomplete:
+        # not in FINISHED_STATUSES) so continue chains; the D-2 reconcile
+        # test passes precheck="completed" to exercise it.
+        srv.get_replies = [(200, json.dumps({"status": precheck}).encode())]
         if tar:
             srv.get_replies.append((tar_status, _worker_tar_bytes()))
         srv.reply_body = _interaction(final_status)
@@ -136,6 +139,28 @@ class ContinueDeliversTest(unittest.TestCase):
         self.assertFalse(os.path.isdir(os.path.join(self.tmp, "t_cont",
                                                     "clone", ".git")))
         self.assertNotIn("clone_dir", self.store.get("t_cont"))
+
+    # Rule 5 (D-2): an interaction that already completed in Google before
+    # the local record caught up is a paid-for result, not a conversation to
+    # re-pay. It is reconciled from the terminal interaction, never restarted.
+    def test_an_already_completed_interaction_is_reconciled_not_restarted(self):
+        self._seed_incomplete()
+        with FakeInteractionsServer() as srv:
+            # G13 pre-check: the interaction is ALREADY completed in Google.
+            srv.get_replies = [
+                (200, json.dumps({"status": "completed"}).encode()),
+                (200, _worker_tar_bytes()),
+            ]
+            srv.reply_body = _interaction("completed")
+            result = self._runner(srv).continue_task(task_id="t_cont")
+        self.assertEqual(result["status"], "completed")
+        clone = os.path.join(self.tmp, "t_cont", "clone")
+        self.assertTrue(os.path.isdir(os.path.join(clone, ".git")))
+        record = self.store.get("t_cont")
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["interaction_id"], "v1_prev")  # no re-pay
+        posts = [r["path"] for r in srv.requests if r["method"] == "POST"]
+        self.assertEqual(posts, [], f"re-started the finished turn: {posts}")
 
 
 if __name__ == "__main__":

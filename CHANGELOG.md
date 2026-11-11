@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
+## [0.30.0] — 2026-11-11
+
+### Added
+
+- `continue_task` now reconciles an interaction the service already reports
+  TERMINAL instead of restarting it: a process that died after the agent
+  finished but before the local record caught up left a paid result
+  unrecovered, and `continue` would have created a fresh interaction and
+  re-paid. Now `completed` recovers the result and delivers it through the
+  same path a run uses; `failed`/`canceled`/`expired` are recorded as-is;
+  and the original interaction id is kept so no new turn is spent (D-2). An
+  `incomplete` interaction (a budget stop) is not terminal and still chains
+  a fresh continue.
+
 ## [0.29.0] — 2026-11-11
 
 ### Added

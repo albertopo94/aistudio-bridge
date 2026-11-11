@@ -153,10 +153,10 @@ class TestContractResend(unittest.TestCase):
             "task": "earlier task",
         })
         with FakeInteractionsServer() as srv:
-            # The pre-check read says the conversation is over, then the
-            # continuation is sent and completes.
+            # The pre-check read is a budget stop (incomplete): not
+            # terminal, so the continuation is sent and completes.
             srv.get_replies.append((200, json.dumps(
-                _interaction("completed", iid="v9")).encode()))
+                _interaction("incomplete", iid="v9")).encode()))
             srv.get_replies.append((200, _worker_tar_bytes()))
             srv.reply_body = _interaction("completed", iid="v10")
             runner = self._runner(srv)
@@ -184,7 +184,7 @@ class TestContractResend(unittest.TestCase):
         })
         with FakeInteractionsServer() as srv:
             srv.get_replies.append((200, json.dumps(
-                _interaction("completed", iid="v9")).encode()))
+                _interaction("incomplete", iid="v9")).encode()))
             srv.get_replies.append((200, _worker_tar_bytes()))
             srv.reply_body = _interaction("completed", iid="v10")
             runner = self._runner(srv)

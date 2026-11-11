@@ -830,6 +830,47 @@ class TaskRunner:
                         ignore=shutil.ignore_patterns(".git"))
         return tests_clone
 
+    def _reconcile_terminal(self, task_id: str, record: dict, current: dict,
+                            *, execute_tests: bool) -> dict:
+        """Collect a terminal interaction the local record never caught up.
+
+        Spec D-2: the process died after the agent finished but before this
+        record was brought up to date. ``current`` is the interaction
+        the record names and Google already reports TERMINAL. It is a paid
+        result never collected, not a conversation to pay again: the record
+        is updated in place and the original interaction id is kept.
+        """
+        status = current.get("status")
+        tokens = self.client.usage(current).get("total_tokens")
+        report = self.client.last_model_output(current)
+        self.store.record({"task_id": task_id, "status": status,
+                           "tokens": tokens, "report": report})
+        result = {
+            "task_id": task_id, "status": status, "tokens": tokens,
+            "budget": record.get("budget"), "branch": record.get("branch"),
+            "environment_id": current.get("environment_id")
+            or record.get("environment_id"),
+            "report": report,
+        }
+        if status != "completed":
+            return result  # failed/canceled/expired: nothing to bring back
+        # The record already names the repository and branch the first turn
+        # declared; a completed reconcile delivers exactly like a run does.
+        repo_url = record.get("repo_url")
+        repo_dir = record.get("repo_dir")
+        repo_name = os.path.basename((repo_dir or "").rstrip("/")) or None
+        if not repo_url or not repo_name:
+            return result  # ask-style record: the text report is the result
+        branch = record.get("branch") or f"worker/{repo_name}-{task_id}"
+        return self._deliver(
+            task_id=task_id, branch=branch,
+            environment_id=current.get("environment_id")
+            or record.get("environment_id"),
+            repo_url=repo_url, repo_name=repo_name, result=result,
+            execute_tests=execute_tests, delete_env=False,
+            base_commit=record.get("base_commit"),
+        )
+
     def continue_task(self, *, task_id: str,
                       budget: int | None = None,
                       memory_save: bool = False,
@@ -886,6 +927,15 @@ class TaskRunner:
                     "report": report,
                     "reason": "running",
                 }
+            # Spec D-2: an interaction the service already reports TERMINAL
+            # (completed/failed/canceled/expired) is a paid result never
+            # collected, not a conversation to restart. Reconcile it in place.
+            # `incomplete` (a budget stop) is not in FINISHED_STATUSES, so it
+            # falls through to the chain-ahead flow below.
+            if current.get("status") in self.FINISHED_STATUSES:
+                return self._reconcile_terminal(
+                    task_id, record, current,
+                    execute_tests=execute_tests)
         # G15: system_instruction and tools are interaction-scoped, so this
         # continuation must re-send them. Rebuild them from the task record:
         # run tasks get the repo contract and the code tools, ask tasks get
