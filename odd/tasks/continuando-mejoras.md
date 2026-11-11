@@ -90,7 +90,7 @@ historial de cambios sincronizado con las versiones publicadas.
 | T5 | P0-2 | aislar tareas concurrentes | 94e950e |
 | T6 | P1-2 | retorno incremental de workspaces grandes | 5ee30dd |
 | T7 | D-1 | idempotencia de llamadas a funciones | f7e86c7 |
-| T8 | D-2 | reconciliación de interacciones completadas | — |
+| T8 | D-2 | reconciliación de interacciones completadas | fa7b86e |
 
 ## Log
 
@@ -196,15 +196,31 @@ opcional (default None -> comportamiento previo intacto, regla 4). Backed
 por TaskStore.record bajo lock (P0-2). Suite 326 OK. Riesgo: item 6 (no hay
 test de red real; idempotencia probada contra fakes del cliente y del store).
 
+L10 (2026-11-11, sesión 2): T8 cerrado en fa7b86e (feat(loop)), v0.30.0.
+Test-first (worker): tests/test_continue_delivery.py + _reconcile_terminal en
+remote_worker/runner.py. Test D-2 observado RED (record interaction_id
+'v1_cont' != 'v1_prev', re-pagó) luego GREEN. Implementa D-2: continue_task
+reconcilia una interacción que el servicio ya reporta TERMINAL
+(completed/failed/canceled/expired) en vez de re-iniciarla — completed
+recupera el resultado y entrega con _deliver (mismo camino que un run);
+failed/canceled/expired se registran tal cual; el interaction_id original se
+conserva (no se gasta turno). incomplete (budget stop) NO está en
+FINISHED_STATUSES, así que sigue chaineando un continue fresco. La condicion
+usa self.FINISHED_STATUSES, no un tuple inline. Ajuste de tests: el stub del
+pre-check G13 en tests/test_continue_delivery.py (_serve) y en
+tests/test_contract_resend.py (reglas 4-5) hardcodeaba {"status":"completed"}
+como centinela de "no esta corriendo" — el bug que D-2 corrige; ahora usan
+precheck/incomplete (el estado real de un budget stop) para que el continue
+fresco siga siendo un test genuino. Suite 327 OK. Riesgo: item 6 (probado
+contra fakes, no contra el servicio vivo).
+
 PENDIENTE PARA LA SIGUIENTE SESIÓN (en este orden recomendado):
 - [x] T6 · P1-2 — retorno incremental de workspaces grandes: cerrado en
   5ee30dd (L8).
 - [x] T7 · D-1 — idempotencia de llamadas a funciones locales: cerrado en
   f7e86c7 (L9).
-- T8 · D-2 — reconciliar interacciones ya completadas en `continue_task()`:
-  hoy, si la interacción ya terminó, se crea otra interacción nueva con
-  `continue`; debe recuperar el resultado y entregarlo (`_deliver()`) en vez
-de re-pagar.
+- [x] T8 · D-2 — reconciliar interacciones completadas en continue: cerrado
+  en fa7b86e (L10).
 - [x] Follow-up P0-1 (L2): reportar `base_moved` en el CLI/status — cerrado
   en f1497d4 (feat(cli), sesión 2, rama feat/retorno-recuperacion, L7).
 - La rama feature quedó en main; el branch local `feat/continuando-mejoras`
