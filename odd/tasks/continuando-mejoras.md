@@ -88,7 +88,7 @@ historial de cambios sincronizado con las versiones publicadas.
 | T3 | DOC-1 | sincronizar CHANGELOG hasta v0.25.7 | c16fc85 |
 | T4 | P1-1 | completar o desactivar la ruta GCS | 9c895ca |
 | T5 | P0-2 | aislar tareas concurrentes | 94e950e |
-| T6 | P1-2 | retorno incremental de workspaces grandes | — |
+| T6 | P1-2 | retorno incremental de workspaces grandes | 5ee30dd |
 | T7 | D-1 | idempotencia de llamadas a funciones | — |
 | T8 | D-2 | reconciliación de interacciones completadas | — |
 
@@ -145,10 +145,44 @@ True y `_report_status` imprime la clave cuando está registrada. Suite 316 OK
 (antes del bump, sin cambio de comportamiento adicional). Resto de la sesión:
 T6, T7, T8.
 
+L8 (2026-11-11, sesión 2): T6 cerrado en 5ee30dd (feat(sync)), v0.28.0.
+Test-first: tests/test_workspace_fallback.py (4 reglas, RED observado) y
+`test_download_streams_the_body_in_bounded_chunks` (RED observado).
+Implementa P1-2 en dos piezas: (1) `FilesClient.download_to` ahora
+streama el cuerpo a disco en chunks de 1 MiB (`_send_to_file` en
+google_client.py) en vez de bufferizar toda la respuesta en memoria —
+la semilla del fallo medido (2 GiB rechazado; TARs grandes mueren a
+~122 s) — conservando la semántica de errores de `_send` exactamente,
+por lo que la entrega y `fetch --path` se benefician sin cambiar
+callers. (2) `_deliver` ahora tiene un fallback: cuando la descarga del
+TAR completo falla (InteractionsError/timeout), `_rebuild_workspace_tar`
+reconstruye el mismo layout (`<repo_name>/...`) archivo por archivo vía
+la lista recursiva + una descarga por archivo (el mismo transporte que
+`fetch --path`), saltando `.git` y build artifacts (la entrega los
+purga igual). El resultado y el CLI dicen `per-file` cuando ocurre el
+swap; si AMBAS vías fallan, la tarea queda `undelivered` nombrando
+AMBOS fallos. Restricción honesta: el fallback solo se dispara ante un
+fallo de la descarga del árbol (el caso medido), no ante un tar corrupto
+200. Suite 321 OK.
+
+L8b (2026-11-11): corrección documental: la entrada del changelog del
+follow-up P0-1 (f1497d4) se etiquetó 0.26.1 pero VERSION era 0.27.0
+desde ese commit; corregida a 0.27.0 en 5ee30dd. No hubo versión
+0.26.1 publicada.
+
+L8c (2026-11-11): BOUNDARY DE SLICE: la rama acumula ~519 líneas desde
+main (f1497d4, e57c371, 5ee30dd + docs). Se excedió el slice de ~400
+líneas; T7 arranca un slice nuevo. Estrategia de entrega: rama feature
+local; push/PR sigue siendo decisión del usuario. Riesgo T6: item 5
+(entorno/transporte de la entrega) y 6 (sin test de red real: el
+fallback se prueba contra un fake de los endpoints, no contra el
+servicio vivo).
+
+Restante: T7 (D-1), T8 (D-2).
+
 PENDIENTE PARA LA SIGUIENTE SESIÓN (en este orden recomendado):
-- T6 · P1-2 — retorno incremental de workspaces grandes. Integrar un retorno
-  por archivos (tipo `fetch --path`) cuando el TAR completo no sea viable
-  (límites medidos: 1 GiB ok, 2 GiB rechazado ~122 s).
+- [x] T6 · P1-2 — retorno incremental de workspaces grandes: cerrado en
+  5ee30dd (L8).
 - T7 · D-1 — idempotencia de llamadas a funciones locales (p. ej.
   `memory_save`): una llamada puede persistir antes de que el resultado llegue
   a Google; si el proceso muere en esa ventana, al continuar se ejecutaría
