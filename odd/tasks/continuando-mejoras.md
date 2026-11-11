@@ -225,3 +225,15 @@ PENDIENTE PARA LA SIGUIENTE SESIÓN (en este orden recomendado):
   en f1497d4 (feat(cli), sesión 2, rama feat/retorno-recuperacion, L7).
 - La rama feature quedó en main; el branch local `feat/continuando-mejoras`
   se mantiene (igual que `feat/hardening`), no se borró.
+
+FOLLOW-UP REGISTRADO AL CIERRE (L11, sesión 2): el usuario pidió dejar
+registrada la posibilidad de una VÍA O SUPERFICIE MCP para aistudio-bridge
+(integrarlo como runtime de Antigravity dentro de Gentle Shell). No hay nada
+construido todavía; es el siguiente gran bloque del roadmap. La base ya
+entregada lo sustenta (P0-2 aislamiento por tarea, D-1 idempotencia, D-2
+reconciliación, P1-2 retorno incremental, P0-1 base_commit). Decisión de
+arquitectura: aistudio-bridge = ejecución remota/transferencia/estado/memoria/
+artefactos; Gentle Shell = runtime, contexto Pi, TaskStore, tarjetas, eventos,
+UX y políticas. Conservar el CLI; el MCP sería una interfaz ADICIONAL. Mirar
+`continuando con mejoras.md` (sección 3) para el detalle de lo que falta y
+memoria Engram topic aistudio-bridge/odd/mcp-server.
