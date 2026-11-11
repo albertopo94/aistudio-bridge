@@ -582,6 +582,13 @@ def _report_run(result: dict) -> int:
     branch = result.get("branch")
     if branch:
         print(f"branch: {branch}")
+    if result.get("workspace_return") == "per-file":
+        # P1-2: the whole-tree TAR could not come back (the measured
+        # ceiling), so the bytes traveled file by file over the same
+        # transport `fetch --path` uses. The delivery is the same; naming
+        # the swap keeps it visible instead of a silent fallback.
+        print("return: per-file (the whole-workspace TAR was too large; "
+              "files came back one by one)")
     if result.get("base_moved"):
         # The snapshot's base commit was no longer the branch head when the
         # delivery landed: the branch advanced while the agent worked. The

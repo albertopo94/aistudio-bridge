@@ -137,6 +137,17 @@ class TestCli(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("base_moved: True", out)
 
+    def test_completed_names_the_per_file_return(self):
+        runner = StubRunner({
+            "task_id": "t_1", "status": "completed",
+            "branch": "worker/abc", "workspace_return": "per-file",
+        })
+        code, out, _ = invoke(
+            ["run", "a task", "--repo", "https://x/y"], runner
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("per-file", out)
+
     # Rule 5
     def test_unknown_task_exits_nonzero(self):
         code, _, err = invoke(["status", "missing"], StubRunner())

@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 from urllib.parse import urlsplit
 
@@ -29,8 +30,9 @@ from .routes import (human_duration, human_rate, is_size_limit,
                      upload_failure_message)
 from .state import (DEFAULT_ROOT, TaskStore, _slug, list_project_stores,
                     new_task_id)
-from .sync import (GitError, apply_to_branch, archive_repo, inline_source,
-                   mount_gcs, mount_repo, run_tests, INLINE_TOTAL_LIMIT_BYTES)
+from .sync import (EXCLUDED_DIRS, GitError, apply_to_branch, archive_repo,
+                   inline_source, mount_gcs, mount_repo, run_tests,
+                   INLINE_TOTAL_LIMIT_BYTES)
 
 AGENT = "antigravity-preview-09-2026"
 DEFAULT_TEST_COMMAND = ["python3", "tests/test_main.py"]
@@ -325,11 +327,29 @@ class TaskRunner:
         Hardening S3: this is the one delivery operation, called by both
         :meth:`run` and :meth:`continue_task`, so a continuation that
         completes stops being the path that never came home.
+
+        P1-2: when the whole-tree download fails (the measured ceiling),
+        the delivery does not die with it -- it reconstructs the same tar
+        file by file over the transport ``fetch --path`` uses, and the
+        result says the bytes came back per-file. Only when BOTH roads
+        fail does the task stay ``undelivered``, naming both failures.
         """
         os.makedirs(self.workdir, exist_ok=True)
         tar_path = os.path.join(self.workdir, f"{task_id}.tar")
+        workspace_return = None
         try:
-            self.files.download_to(environment_id, "workspace", tar_path)
+            try:
+                self.files.download_to(environment_id, "workspace", tar_path)
+            except (InteractionsError, InteractionsTimeoutError) as tar_exc:
+                try:
+                    self._rebuild_workspace_tar(environment_id, repo_name,
+                                                tar_path)
+                except Exception as file_exc:  # noqa: BLE001 - both named
+                    raise RuntimeError(
+                        f"the workspace tar download failed ({tar_exc}) and "
+                        f"the per-file fallback failed ({file_exc})"
+                    ) from file_exc
+                workspace_return = "per-file"
             applied = apply_to_branch(
                 tar_path=tar_path, repo_url=repo_url, branch=branch,
                 # P0-2: each task applies into its OWN clone. A shared
@@ -340,7 +360,7 @@ class TaskRunner:
                 repo_dir=repo_name, base_commit=base_commit,
             )
         except (InteractionsError, InteractionsTimeoutError, GitError,
-                tarfile.TarError, OSError) as exc:
+                tarfile.TarError, OSError, RuntimeError) as exc:
             return self._undelivered(task_id, branch=branch,
                                      environment_id=environment_id,
                                      result=result, exc=exc)
@@ -350,6 +370,10 @@ class TaskRunner:
             # per task -- including the partial one a failed download leaves.
             if os.path.exists(tar_path):
                 os.remove(tar_path)
+        if workspace_return:
+            # The branch the user is about to review traveled a different
+            # road than the default; saying so beats a silent transport swap.
+            result["workspace_return"] = workspace_return
         # Hardening S1: the delivered tree was written by a prompted agent.
         # Running its tests is executing that code on the user's machine, so
         # it never happens unless the user says so with --run-tests; the
@@ -639,6 +663,56 @@ class TaskRunner:
             result=result, execute_tests=execute_tests,
             delete_env=delete_env, base_commit=base_commit,
         )
+
+    def _rebuild_workspace_tar(self, environment_id: str, repo_name: str,
+                               dest: str) -> None:
+        """P1-2: reconstruct the workspace tar file by file.
+
+        The whole-tree download has measured ceilings (2 GiB rejected;
+        large TARs dying around 122 s), but the sandbox still holds every
+        file and the per-file transport is the one ``fetch --path``
+        already uses, so a too-big workspace is a transport problem, not a
+        lost task. The rebuilt tar carries the same layout
+        :func:`apply_to_branch` expects (entries under ``<repo_name>/``),
+        so the delivery reads it exactly as it reads the service's tar.
+
+        ``.git`` metadata and build artifacts (EXCLUDED_DIRS) are skipped:
+        the delivery purges them anyway (_purge_artifacts), so downloading
+        them would spend quota only to throw the bytes away.
+
+        Raises on the first file that cannot be read; the partial tar is
+        left for the caller's cleanup and the delivery never starts on it.
+        """
+        entries = self.files.list_files(environment_id, "workspace")
+        files = [e for e in entries
+                 if e.get("type") != "DIRECTORY" and e.get("path")]
+        if not files:
+            raise ValueError(
+                "the per-file fallback got an empty workspace listing; "
+                "the sandbox likely expired")
+        with tarfile.open(dest, "w") as tar:
+            for entry in files:
+                rel = entry["path"].strip("/")
+                if not rel.startswith("workspace/"):
+                    continue  # outside the mounted workspace: not the delivery
+                member = rel[len("workspace/"):]
+                if not member or any(part in EXCLUDED_DIRS
+                                     for part in member.split("/")):
+                    continue
+                fd, tmp_name = tempfile.mkstemp(prefix="worker-fb-",
+                                                dir=self.workdir)
+                os.close(fd)
+                try:
+                    written = self.files.download_to(
+                        environment_id, entry["path"], tmp_name,
+                        recursive=False)
+                    info = tarfile.TarInfo(member)
+                    info.size = written
+                    info.mode = 0o644
+                    with open(tmp_name, "rb") as fh:
+                        tar.addfile(info, fh)
+                finally:
+                    os.remove(tmp_name)
 
     def _undelivered(self, task_id, *, branch, environment_id, result, exc):
         """Record a task whose agent finished but whose bytes did not arrive.

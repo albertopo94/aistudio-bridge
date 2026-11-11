@@ -5,7 +5,26 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) while
 unstable: `0.x` may break freely.
 
-## [0.26.1] — 2026-11-10
+## [0.28.0] — 2026-11-11
+
+### Added
+
+- When the whole-workspace TAR cannot come back (the measured ceiling:
+  2 GiB rejected, large TARs dying around 122 s), the delivery
+  reconstructs the workspace file by file over the same transport
+  `fetch --path` uses and delivers as usual; the result and the CLI say
+  `per-file` so the transport swap stays visible. `.git` metadata and
+  build artifacts are not downloaded -- the delivery purges them anyway.
+  Only when BOTH roads fail does the task stay `undelivered`, naming
+  both failures (P1-2).
+
+### Changed
+
+- Downloads stream to disk in 1 MiB chunks instead of buffering the whole
+  response in memory, for the workspace delivery and `fetch --path`
+  alike (P1-2).
+
+## [0.27.0] — 2026-11-10
 
 ### Changed
 
