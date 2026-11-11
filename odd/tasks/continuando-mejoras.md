@@ -89,7 +89,7 @@ historial de cambios sincronizado con las versiones publicadas.
 | T4 | P1-1 | completar o desactivar la ruta GCS | 9c895ca |
 | T5 | P0-2 | aislar tareas concurrentes | 94e950e |
 | T6 | P1-2 | retorno incremental de workspaces grandes | 5ee30dd |
-| T7 | D-1 | idempotencia de llamadas a funciones | 6499fae |
+| T7 | D-1 | idempotencia de llamadas a funciones | f7e86c7 |
 | T8 | D-2 | reconciliación de interacciones completadas | — |
 
 ## Log
@@ -180,7 +180,7 @@ servicio vivo).
 
 Restante: T7 (D-1), T8 (D-2).
 
-L9 (2026-11-11, sesión 2): T7 cerrado en 6499fae (feat(loop)), v0.29.0.
+L9 (2026-11-11, sesión 2): T7 cerrado en f7e86c7 (feat(loop)), v0.29.0.
 Test-first: tests/test_idempotent_calls.py (4 reglas, RED observado).
 Implementa D-1: cada llamada local resuelta se persiste en el registro de
 tarea bajo `local_calls` -> `<interaction_id>` -> `<call_id>` inmediatamente
@@ -200,7 +200,7 @@ PENDIENTE PARA LA SIGUIENTE SESIÓN (en este orden recomendado):
 - [x] T6 · P1-2 — retorno incremental de workspaces grandes: cerrado en
   5ee30dd (L8).
 - [x] T7 · D-1 — idempotencia de llamadas a funciones locales: cerrado en
-  6499fae (L9).
+  f7e86c7 (L9).
 - T8 · D-2 — reconciliar interacciones ya completadas en `continue_task()`:
   hoy, si la interacción ya terminó, se crea otra interacción nueva con
   `continue`; debe recuperar el resultado y entregarlo (`_deliver()`) en vez
